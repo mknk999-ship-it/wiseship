@@ -9,6 +9,7 @@ import {
   maxButtonClassName,
   primaryButtonClassName,
 } from "@/components/ui";
+import { floorTo2, sanitizeDecimalInput } from "@/lib/decimal-input";
 import { formatKrw, formatUsdt } from "@/lib/format";
 
 const initialState: MarginState = {};
@@ -22,13 +23,16 @@ export function SellUsdtForm({
 }) {
   const [state, action, pending] = useActionState(sellUsdtToKrw, initialState);
   const [display, setDisplay] = useState("");
+  const [useMax, setUseMax] = useState(false);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setDisplay(e.target.value.replace(/[^0-9.]/g, ""));
+    setDisplay(sanitizeDecimalInput(e.target.value));
+    setUseMax(false);
   }
 
   function handleMax() {
-    setDisplay(String(upbitUsdt));
+    setDisplay(String(floorTo2(upbitUsdt)));
+    setUseMax(true);
   }
 
   const amount = Number(display);
@@ -36,6 +40,7 @@ export function SellUsdtForm({
 
   return (
     <form action={action} className="space-y-3">
+      <input type="hidden" name="useMax" value={useMax ? "1" : ""} />
       <p className="text-xs text-zinc-400">
         현재 USDT/KRW 시세{" "}
         <span className="font-medium text-zinc-200">{formatKrw(rate)}</span>

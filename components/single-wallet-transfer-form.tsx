@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 
-import { withdrawToUpbit, type MarginState } from "@/app/actions/margin";
+import { walletTransfer, type MarginState } from "@/app/actions/margin";
 import {
   errorBoxClassName,
   inputClassName,
@@ -14,9 +14,17 @@ import { formatUsdt } from "@/lib/format";
 
 const initialState: MarginState = {};
 
-export function WithdrawToUpbitForm({ funding }: { funding: number }) {
+export function SingleWalletTransferForm({
+  direction,
+  balance,
+  submitLabel,
+}: {
+  direction: "funding_to_trading" | "trading_to_funding";
+  balance: number;
+  submitLabel: string;
+}) {
   const [state, action, pending] = useActionState(
-    withdrawToUpbit,
+    walletTransfer,
     initialState,
   );
   const [display, setDisplay] = useState("");
@@ -28,27 +36,30 @@ export function WithdrawToUpbitForm({ funding }: { funding: number }) {
   }
 
   function handleMax() {
-    setDisplay(String(floorTo2(funding)));
+    setDisplay(String(floorTo2(balance)));
     setUseMax(true);
   }
 
+  const inputId = `wallet-transfer-amount-${direction}`;
+
   return (
     <form action={action} className="space-y-3">
+      <input type="hidden" name="direction" value={direction} />
       <input type="hidden" name="useMax" value={useMax ? "1" : ""} />
       <div>
         <label
-          htmlFor="funding-withdraw-amount"
+          htmlFor={inputId}
           className="mb-1.5 block text-sm font-medium text-zinc-300"
         >
-          출금할 금액 (USDT)
+          이체 금액 (USDT)
         </label>
         <div className="relative">
           <input
-            id="funding-withdraw-amount"
+            id={inputId}
             name="amount"
             type="text"
             inputMode="decimal"
-            placeholder={`최대 ${formatUsdt(funding)}`}
+            placeholder={`최대 ${formatUsdt(balance)}`}
             value={display}
             onChange={handleChange}
             className={`${inputClassName} pr-16`}
@@ -67,7 +78,7 @@ export function WithdrawToUpbitForm({ funding }: { funding: number }) {
       {state.error && <p className={errorBoxClassName}>{state.error}</p>}
 
       <button type="submit" disabled={pending} className={primaryButtonClassName}>
-        {pending ? "처리 중..." : "업비트로 출금"}
+        {pending ? "처리 중..." : submitLabel}
       </button>
     </form>
   );

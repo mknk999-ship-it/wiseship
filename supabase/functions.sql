@@ -119,7 +119,22 @@ begin
 end;
 $$;
 
-create or replace function wallet_transfer(p_direction text, p_amount numeric)
+-- ===== 버그 수정: MAX 이체가 부동소수점 왕복 오차로 "잔고 부족" 거부되는 문제 =====
+-- Next.js 액션이 자기 잔고를 다시 읽어 p_amount로 넘기는 방식(이전 수정)은, 그 읽은
+-- 값 자체가 이미 supabase-js(JS double, 유효자리 15~17자리)를 한 번 거친 근사치라서
+-- RPC가 독자적으로 다시 읽는 정확한 Postgres numeric 값과 미세하게 어긋날 수 있었다
+-- (Postgres numeric은 JS double보다 더 많은 자릿수를 담을 수 있음). p_use_max=true일
+-- 때는 RPC가 검증에 쓴 바로 그 변수를 이체 금액으로도 그대로 써서 JS를 아예
+-- 거치지 않게 한다 — p_amount 파라미터가 새로 추가되는 게 아니라 개수가 바뀌므로
+-- create or replace만으로는 기존 함수를 덮어쓰지 않고 별도 오버로드가 추가돼버려서
+-- (PGRST203 유발) drop부터 해야 한다.
+drop function if exists wallet_transfer(text, numeric);
+
+create or replace function wallet_transfer(
+  p_direction text,
+  p_amount numeric,
+  p_use_max boolean default false
+)
 returns void
 language plpgsql
 as $$
@@ -127,15 +142,16 @@ declare
   v_uid uuid := auth.uid();
   v_funding numeric;
   v_trading numeric;
+  v_amount numeric;
 begin
   if v_uid is null then
     raise exception 'not_authenticated';
   end if;
-  if p_amount is null or p_amount <= 0 then
-    raise exception 'invalid_amount';
-  end if;
   if p_direction not in ('funding_to_trading', 'trading_to_funding') then
     raise exception 'invalid_direction';
+  end if;
+  if not p_use_max and (p_amount is null or p_amount <= 0) then
+    raise exception 'invalid_amount';
   end if;
 
   select okx_funding_usdt, okx_trading_usdt into v_funding, v_trading
@@ -146,25 +162,35 @@ begin
   end if;
 
   if p_direction = 'funding_to_trading' then
-    if p_amount > v_funding then
+    v_amount := case when p_use_max then v_funding else p_amount end;
+  else
+    v_amount := case when p_use_max then v_trading else p_amount end;
+  end if;
+
+  if p_use_max and (v_amount is null or v_amount <= 0) then
+    raise exception 'no_balance';
+  end if;
+
+  if p_direction = 'funding_to_trading' then
+    if not p_use_max and v_amount > v_funding then
       raise exception 'insufficient_balance';
     end if;
     update accounts
-      set okx_funding_usdt = okx_funding_usdt - p_amount,
-          okx_trading_usdt = okx_trading_usdt + p_amount
+      set okx_funding_usdt = okx_funding_usdt - v_amount,
+          okx_trading_usdt = okx_trading_usdt + v_amount
       where user_id = v_uid;
   else
-    if p_amount > v_trading then
+    if not p_use_max and v_amount > v_trading then
       raise exception 'insufficient_balance';
     end if;
     update accounts
-      set okx_trading_usdt = okx_trading_usdt - p_amount,
-          okx_funding_usdt = okx_funding_usdt + p_amount
+      set okx_trading_usdt = okx_trading_usdt - v_amount,
+          okx_funding_usdt = okx_funding_usdt + v_amount
       where user_id = v_uid;
   end if;
 
   insert into transactions (user_id, type, detail)
-    values (v_uid, 'wallet_transfer', jsonb_build_object('direction', p_direction, 'amount', p_amount));
+    values (v_uid, 'wallet_transfer', jsonb_build_object('direction', p_direction, 'amount', v_amount));
 end;
 $$;
 
@@ -588,18 +614,21 @@ drop view if exists public.rankings;
 -- 1회성 마법사가 아니라 wallet_transfer처럼 금액을 직접 입력하는 반복 가능한 이체이므로
 -- initial_krw/initial_usdt 같은 완료 플래그는 두지 않는다.
 
-create or replace function withdraw_to_upbit(p_amount numeric)
+drop function if exists withdraw_to_upbit(numeric);
+
+create or replace function withdraw_to_upbit(p_amount numeric, p_use_max boolean default false)
 returns void
 language plpgsql
 as $$
 declare
   v_uid uuid := auth.uid();
   v_funding numeric;
+  v_amount numeric;
 begin
   if v_uid is null then
     raise exception 'not_authenticated';
   end if;
-  if p_amount is null or p_amount <= 0 then
+  if not p_use_max and (p_amount is null or p_amount <= 0) then
     raise exception 'invalid_amount';
   end if;
 
@@ -609,17 +638,22 @@ begin
   if v_funding is null then
     raise exception 'account_not_found';
   end if;
-  if p_amount > v_funding then
+
+  v_amount := case when p_use_max then v_funding else p_amount end;
+  if p_use_max and (v_amount is null or v_amount <= 0) then
+    raise exception 'no_balance';
+  end if;
+  if not p_use_max and v_amount > v_funding then
     raise exception 'insufficient_balance';
   end if;
 
   update accounts
-    set okx_funding_usdt = okx_funding_usdt - p_amount,
-        upbit_usdt = upbit_usdt + p_amount
+    set okx_funding_usdt = okx_funding_usdt - v_amount,
+        upbit_usdt = upbit_usdt + v_amount
     where user_id = v_uid;
 
   insert into transactions (user_id, type, detail)
-    values (v_uid, 'okx_withdraw', jsonb_build_object('usdt_amount', p_amount));
+    values (v_uid, 'okx_withdraw', jsonb_build_object('usdt_amount', v_amount));
 end;
 $$;
 
@@ -703,11 +737,17 @@ drop function if exists open_position(
 -- 가능해서 인프라 부담은 동일하다. 반면 이 방식은 새 인프라 없이, 이미 이 저장소에 있는
 -- open_position/close_position과 완전히 같은 신뢰 모델을 재사용한다.
 drop function if exists sell_usdt_to_krw(numeric, numeric);
+drop function if exists sell_usdt_to_krw(uuid, numeric, numeric);
 
+-- p_use_max=true일 때는 p_amount를 무시하고 이 함수가 방금 읽은 v_usdt(Postgres
+-- 원본 정밀도)를 그대로 매도 수량으로 쓴다. Next.js 액션이 잔고를 다시 읽어 넘기는
+-- 방식만으로는, 그 값 자체가 이미 JS double을 한 번 거친 근사치라 이 함수가 독자적으로
+-- 재조회하는 정확한 값과 미세하게 어긋나 insufficient_balance로 잘못 막힐 수 있었다.
 create or replace function sell_usdt_to_krw(
   p_user_id uuid,
   p_amount numeric,
-  p_rate numeric
+  p_rate numeric,
+  p_use_max boolean default false
 )
 returns void
 language plpgsql
@@ -715,15 +755,16 @@ as $$
 declare
   v_usdt numeric;
   v_krw numeric;
+  v_amount numeric;
 begin
   if p_user_id is null then
     raise exception 'not_authenticated';
   end if;
-  if p_amount is null or p_amount <= 0 then
-    raise exception 'invalid_amount';
-  end if;
   if p_rate is null or p_rate <= 0 then
     raise exception 'invalid_rate';
+  end if;
+  if not p_use_max and (p_amount is null or p_amount <= 0) then
+    raise exception 'invalid_amount';
   end if;
 
   select upbit_usdt into v_usdt
@@ -732,14 +773,19 @@ begin
   if v_usdt is null then
     raise exception 'account_not_found';
   end if;
-  if p_amount > v_usdt then
+
+  v_amount := case when p_use_max then v_usdt else p_amount end;
+  if p_use_max and (v_amount is null or v_amount <= 0) then
+    raise exception 'no_balance';
+  end if;
+  if not p_use_max and v_amount > v_usdt then
     raise exception 'insufficient_balance';
   end if;
 
-  v_krw := round(p_amount * p_rate);
+  v_krw := round(v_amount * p_rate);
 
   update accounts
-    set upbit_usdt = upbit_usdt - p_amount,
+    set upbit_usdt = upbit_usdt - v_amount,
         upbit_krw = upbit_krw + v_krw
     where user_id = p_user_id;
 
@@ -747,15 +793,15 @@ begin
     values (
       p_user_id,
       'usdt_sell',
-      jsonb_build_object('usdt_amount', p_amount, 'rate', p_rate, 'krw_amount', v_krw)
+      jsonb_build_object('usdt_amount', v_amount, 'rate', p_rate, 'krw_amount', v_krw)
     );
 end;
 $$;
 
-revoke all on function sell_usdt_to_krw(uuid, numeric, numeric) from public;
-revoke all on function sell_usdt_to_krw(uuid, numeric, numeric) from anon;
-revoke all on function sell_usdt_to_krw(uuid, numeric, numeric) from authenticated;
-grant execute on function sell_usdt_to_krw(uuid, numeric, numeric) to service_role;
+revoke all on function sell_usdt_to_krw(uuid, numeric, numeric, boolean) from public;
+revoke all on function sell_usdt_to_krw(uuid, numeric, numeric, boolean) from anon;
+revoke all on function sell_usdt_to_krw(uuid, numeric, numeric, boolean) from authenticated;
+grant execute on function sell_usdt_to_krw(uuid, numeric, numeric, boolean) to service_role;
 
 -- ===== 보안 강화: buy_usdt_all도 동일한 이유로 서비스롤 전용으로 잠금 =====
 -- sell_usdt_to_krw와 완전히 같은 취약점: 기존 buy_usdt_all(p_rate)는 SECURITY INVOKER +
@@ -809,3 +855,192 @@ revoke all on function buy_usdt_all(uuid, numeric) from public;
 revoke all on function buy_usdt_all(uuid, numeric) from anon;
 revoke all on function buy_usdt_all(uuid, numeric) from authenticated;
 grant execute on function buy_usdt_all(uuid, numeric) to service_role;
+
+-- ===== 지갑 관리 개편: 입금 탭(보유 KRW → USDT → OKX Funding → Trading, 정방향) =====
+-- 기존 buy_usdt_all/transfer_to_okx_funding은 "최초 1회, 잔액 전액" 전용 마법사 로직이다.
+-- 지갑 관리 화면에서는 sell_usdt_to_krw/withdraw_to_upbit처럼 반복 가능한 "일부 금액"
+-- 버전이 필요해서, 대칭되는 두 함수를 새로 추가하고 기존 전액 버전은 이 함수들에
+-- 위임하도록 다시 정의해 환전/이체 로직이 두 곳으로 갈라지지 않게 한다.
+
+-- buy_usdt: sell_usdt_to_krw와 완전히 동일한 신뢰 모델(서비스롤 전용, 서버가 재조회한
+-- 환율만 신뢰 — 사용자가 자기 JWT로 직접 호출해 p_rate를 조작하는 것을 막기 위함).
+-- p_use_max는 sell_usdt_to_krw와 동일한 이유(부동소수점 왕복 오차로 인한 오탐 방지)로
+-- 함께 추가한다.
+drop function if exists buy_usdt(uuid, numeric, numeric);
+
+create or replace function buy_usdt(
+  p_user_id uuid,
+  p_amount numeric,
+  p_rate numeric,
+  p_use_max boolean default false
+)
+returns void
+language plpgsql
+as $$
+declare
+  v_krw numeric;
+  v_usdt numeric;
+  v_amount numeric;
+begin
+  if p_user_id is null then
+    raise exception 'not_authenticated';
+  end if;
+  if p_rate is null or p_rate <= 0 then
+    raise exception 'invalid_rate';
+  end if;
+  if not p_use_max and (p_amount is null or p_amount <= 0) then
+    raise exception 'invalid_amount';
+  end if;
+
+  select upbit_krw into v_krw
+    from accounts where user_id = p_user_id for update;
+
+  if v_krw is null then
+    raise exception 'account_not_found';
+  end if;
+
+  v_amount := case when p_use_max then v_krw else p_amount end;
+  if p_use_max and (v_amount is null or v_amount <= 0) then
+    raise exception 'no_balance';
+  end if;
+  if not p_use_max and v_amount > v_krw then
+    raise exception 'insufficient_balance';
+  end if;
+
+  v_usdt := round(v_amount / p_rate, 2);
+
+  update accounts
+    set upbit_krw = upbit_krw - v_amount,
+        upbit_usdt = upbit_usdt + v_usdt
+    where user_id = p_user_id;
+
+  insert into transactions (user_id, type, detail)
+    values (
+      p_user_id,
+      'usdt_buy',
+      jsonb_build_object('krw_amount', v_amount, 'rate', p_rate, 'usdt_amount', v_usdt)
+    );
+end;
+$$;
+
+revoke all on function buy_usdt(uuid, numeric, numeric, boolean) from public;
+revoke all on function buy_usdt(uuid, numeric, numeric, boolean) from anon;
+revoke all on function buy_usdt(uuid, numeric, numeric, boolean) from authenticated;
+grant execute on function buy_usdt(uuid, numeric, numeric, boolean) to service_role;
+
+-- buy_usdt_all은 이제 전액을 조회해 buy_usdt에 위임만 한다 (환전 로직 중복 제거).
+-- 시그니처·에러코드·권한은 기존과 동일하게 유지되므로 margin-setup 호출부는 변경 불필요.
+create or replace function buy_usdt_all(p_user_id uuid, p_rate numeric)
+returns void
+language plpgsql
+as $$
+declare
+  v_krw numeric;
+begin
+  if p_user_id is null then
+    raise exception 'not_authenticated';
+  end if;
+  if p_rate is null or p_rate <= 0 then
+    raise exception 'invalid_rate';
+  end if;
+
+  select upbit_krw into v_krw
+    from accounts where user_id = p_user_id for update;
+
+  if v_krw is null then
+    raise exception 'account_not_found';
+  end if;
+  if v_krw <= 0 then
+    raise exception 'no_balance';
+  end if;
+
+  perform buy_usdt(p_user_id, v_krw, p_rate);
+end;
+$$;
+
+revoke all on function buy_usdt_all(uuid, numeric) from public;
+revoke all on function buy_usdt_all(uuid, numeric) from anon;
+revoke all on function buy_usdt_all(uuid, numeric) from authenticated;
+grant execute on function buy_usdt_all(uuid, numeric) to service_role;
+
+-- deposit_to_okx_funding: withdraw_to_upbit와 대칭(업비트 USDT → OKX Funding, 일부 금액,
+-- 반복 가능). 환율이 개입하지 않는 단순 잔고 이동이라 wallet_transfer/withdraw_to_upbit와
+-- 동일하게 SECURITY INVOKER + auth.uid()로 충분하다(서비스롤 잠금 불필요).
+drop function if exists deposit_to_okx_funding(numeric);
+
+create or replace function deposit_to_okx_funding(p_amount numeric, p_use_max boolean default false)
+returns void
+language plpgsql
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_usdt numeric;
+  v_amount numeric;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+  if not p_use_max and (p_amount is null or p_amount <= 0) then
+    raise exception 'invalid_amount';
+  end if;
+
+  select upbit_usdt into v_usdt
+    from accounts where user_id = v_uid for update;
+
+  if v_usdt is null then
+    raise exception 'account_not_found';
+  end if;
+
+  v_amount := case when p_use_max then v_usdt else p_amount end;
+  if p_use_max and (v_amount is null or v_amount <= 0) then
+    raise exception 'no_balance';
+  end if;
+  if not p_use_max and v_amount > v_usdt then
+    raise exception 'insufficient_balance';
+  end if;
+
+  update accounts
+    set upbit_usdt = upbit_usdt - v_amount,
+        okx_funding_usdt = okx_funding_usdt + v_amount
+    where user_id = v_uid;
+
+  insert into transactions (user_id, type, detail)
+    values (v_uid, 'okx_transfer', jsonb_build_object('usdt_amount', v_amount));
+end;
+$$;
+
+-- transfer_to_okx_funding(최초 설정 마법사, 전액 + initial_usdt 완료 플래그)도 위 함수에
+-- 위임하도록 재정의. 게이트(already_finalized/no_balance)와 플래그 세팅은 그대로 유지.
+create or replace function transfer_to_okx_funding()
+returns void
+language plpgsql
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_usdt numeric;
+  v_initial_usdt numeric;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+
+  select upbit_usdt, initial_usdt into v_usdt, v_initial_usdt
+    from accounts where user_id = v_uid for update;
+
+  if v_usdt is null then
+    raise exception 'account_not_found';
+  end if;
+  if v_initial_usdt <> 0 then
+    raise exception 'already_finalized';
+  end if;
+  if v_usdt <= 0 then
+    raise exception 'no_balance';
+  end if;
+
+  perform deposit_to_okx_funding(v_usdt);
+
+  update accounts
+    set initial_usdt = v_usdt
+    where user_id = v_uid;
+end;
+$$;
