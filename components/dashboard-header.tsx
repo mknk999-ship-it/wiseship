@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { logout } from "@/app/actions/auth";
+import { NavMenu } from "@/components/nav-menu";
 import { formatUsdt, formatUsdtCompact } from "@/lib/format";
 
 export function DashboardHeader({
@@ -43,32 +43,7 @@ export function DashboardHeader({
             </p>
           </div>
 
-          <Link
-            href="/dashboard/positions"
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-zinc-600"
-          >
-            포지션 {openPositionCount}/5
-          </Link>
-
-          <Link
-            href="/dashboard/ranking"
-            className="hidden rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-zinc-600 sm:inline-block"
-          >
-            랭킹
-          </Link>
-
-          <span className="hidden text-sm text-zinc-400 sm:inline">
-            {nickname}님
-          </span>
-
-          <form action={logout}>
-            <button
-              type="submit"
-              className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-red-800 hover:text-red-300"
-            >
-              로그아웃
-            </button>
-          </form>
+          <NavMenu nickname={nickname} openPositionCount={openPositionCount} />
         </div>
       </div>
     </header>

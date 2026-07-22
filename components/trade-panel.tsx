@@ -4,14 +4,25 @@ import { useActionState, useEffect, useRef, useState } from "react";
 
 import { openPositionAction, type TradeState } from "@/app/actions/trade";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
-import { MAX_LEVERAGE, openPosition, unrealizedPnl, type Side } from "@/lib/engine";
-import { formatSignedUsdt, formatUsdt } from "@/lib/format";
+import {
+  MAX_LEVERAGE,
+  TAKER_FEE,
+  openPosition,
+  unrealizedPnl,
+  type Side,
+} from "@/lib/engine";
+import { formatSignedUsdt, formatSymbol, formatUsdt } from "@/lib/format";
 import { subscribeMarkPrice, type Symbol } from "@/lib/prices";
 import { validateTpSl } from "@/lib/trade";
 
 const initialState: TradeState = {};
 
 const SYMBOLS: Symbol[] = ["BTC-USDT-SWAP", "ETH-USDT-SWAP"];
+const MARGIN_PRESETS = [0.25, 0.5, 0.75, 1] as const;
+
+function floorTo2(value: number): number {
+  return Math.max(0, Math.floor(value * 100) / 100);
+}
 
 type Flash = "up" | "down" | null;
 
@@ -90,6 +101,14 @@ export function TradePanel({
     setMarginDisplay(digits);
   }
 
+  function handleMarginPreset(pct: number) {
+    const amount =
+      pct === 1
+        ? floorTo2(initialTradingBalance / (1 + leverage * TAKER_FEE))
+        : floorTo2(initialTradingBalance * pct);
+    setMarginDisplay(amount > 0 ? String(amount) : "");
+  }
+
   const tpPrice = tpDisplay === "" ? null : Number(tpDisplay);
   const slPrice = slDisplay === "" ? null : Number(slDisplay);
 
@@ -140,7 +159,7 @@ export function TradePanel({
                 : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            {s}
+            {formatSymbol(s)}
           </button>
         ))}
       </div>
@@ -205,6 +224,18 @@ export function TradePanel({
             onChange={handleMarginChange}
             className={inputClassName}
           />
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            {MARGIN_PRESETS.map((pct) => (
+              <button
+                key={pct}
+                type="button"
+                onClick={() => handleMarginPreset(pct)}
+                className="rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 text-sm font-medium text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100"
+              >
+                {pct * 100}%
+              </button>
+            ))}
+          </div>
         </div>
 
         <div>

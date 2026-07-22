@@ -14,7 +14,7 @@ export default async function PositionsPage() {
   const { data: positions } = await supabase
     .from("positions")
     .select(
-      "id, symbol, side, margin, leverage, qty, entry_price, liq_price, tp_price, sl_price",
+      "id, symbol, side, margin, leverage, qty, entry_price, liq_price, tp_price, sl_price, opened_at",
     )
     .eq("user_id", user.id)
     .eq("status", "open")

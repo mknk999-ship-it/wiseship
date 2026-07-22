@@ -8,7 +8,7 @@ import {
   inputClassName,
   primaryButtonClassName,
 } from "@/components/ui";
-import { formatUsdt } from "@/lib/format";
+import { formatUsdt, formatUsdtAmount } from "@/lib/format";
 
 const initialState: MarginState = {};
 
@@ -37,16 +37,22 @@ export function WalletTransferForm({
   return (
     <form action={action} className="space-y-4">
       <div className="grid grid-cols-2 gap-3 text-center">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="flex min-h-[92px] flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
           <p className="text-xs text-zinc-400">Funding 지갑</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-50">
-            {formatUsdt(funding)}
+          <p className="mt-1 truncate text-lg font-semibold tabular-nums text-zinc-50">
+            {formatUsdtAmount(funding)}
+          </p>
+          <p className="mt-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
+            USDT
           </p>
         </div>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="flex min-h-[92px] flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
           <p className="text-xs text-zinc-400">Trading 지갑</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-50">
-            {formatUsdt(trading)}
+          <p className="mt-1 truncate text-lg font-semibold tabular-nums text-zinc-50">
+            {formatUsdtAmount(trading)}
+          </p>
+          <p className="mt-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
+            USDT
           </p>
         </div>
       </div>

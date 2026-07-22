@@ -14,6 +14,7 @@ export type OpenPosition = {
   liq_price: number;
   tp_price: number | null;
   sl_price: number | null;
+  opened_at: string;
 };
 
 export async function getOpenPositionCount(

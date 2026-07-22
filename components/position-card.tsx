@@ -10,10 +10,13 @@ import {
   type TpSlState,
 } from "@/app/actions/trade";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
-import { roePercent, unrealizedPnl, type Side } from "@/lib/engine";
+import { roePercent, toKrw, unrealizedPnl, type Side } from "@/lib/engine";
 import {
+  formatKrw,
+  formatRelativeTime,
   formatSignedKrw,
   formatSignedUsdt,
+  formatSymbol,
   formatUsdt,
 } from "@/lib/format";
 import type { OpenPosition } from "@/lib/positions";
@@ -54,6 +57,8 @@ export function PositionCard({
   const roe = pnl != null ? roePercent(pnl, position.margin) : null;
   const pnlKrw =
     pnl != null && usdtKrwRate != null ? pnl * usdtKrwRate : null;
+  const marginKrw =
+    usdtKrwRate != null ? toKrw(position.margin, usdtKrwRate) : null;
 
   const liqDistance =
     markPrice != null
@@ -93,7 +98,7 @@ export function PositionCard({
     >
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold text-zinc-50">
-          {position.symbol}
+          {formatSymbol(position.symbol)}
         </span>
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -106,7 +111,11 @@ export function PositionCard({
         </span>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-y-1 text-xs text-zinc-400">
+      <div className="mt-3 grid grid-cols-2 items-center gap-y-1.5 text-xs text-zinc-400">
+        <span>진입 시간</span>
+        <span className="text-right text-zinc-200">
+          {formatRelativeTime(position.opened_at)}
+        </span>
         <span>진입가</span>
         <span className="text-right text-zinc-200">
           {position.entry_price.toLocaleString("ko-KR", {
@@ -118,8 +127,13 @@ export function PositionCard({
           {position.qty.toFixed(6)}
         </span>
         <span>증거금</span>
-        <span className="text-right text-zinc-200">
-          {formatUsdt(position.margin)}
+        <span className="text-right leading-tight text-zinc-200">
+          <span className="block">{formatUsdt(position.margin)}</span>
+          {marginKrw != null && (
+            <span className="block text-[11px] text-zinc-500">
+              {formatKrw(marginKrw)}
+            </span>
+          )}
         </span>
         <span>현재가</span>
         <span className="text-right text-zinc-200">
