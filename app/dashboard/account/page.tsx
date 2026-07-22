@@ -8,8 +8,8 @@ import { PositionsList } from "@/components/positions-list";
 import { MAX_OPEN_POSITIONS, roePercent } from "@/lib/engine";
 import { calcTotalEquity } from "@/lib/equity";
 import {
+  formatDateTime,
   formatKrw,
-  formatRelativeTime,
   formatSignedKrw,
   formatSignedUsdt,
   formatUsdt,
@@ -178,9 +178,11 @@ export default async function AccountPage({
             </p>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg bg-zinc-950/40 p-3">
-            <span className="text-sm text-zinc-400">미실현 손익</span>
-            <span className={`text-sm font-semibold ${pnlColor}`}>
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-zinc-950/40 p-3">
+            <span className="shrink-0 whitespace-nowrap text-sm text-zinc-400">
+              미실현 손익
+            </span>
+            <span className={`min-w-0 text-right text-sm font-semibold ${pnlColor}`}>
               {formatSignedUsdt(aggregate.totalUnrealizedPnl)}
               {pnlKrw != null && (
                 <span className="ml-1 text-xs font-normal text-zinc-500">
@@ -196,21 +198,23 @@ export default async function AccountPage({
             </span>
           </div>
 
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-zinc-400">보유 USDT (Funding+Trading)</span>
-            <span className="font-medium text-zinc-50">
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="shrink-0 whitespace-nowrap text-zinc-400">
+              보유 USDT (Funding+Trading)
+            </span>
+            <span className="min-w-0 text-right font-medium text-zinc-50">
               {formatUsdt(okxWalletUsdt)}
             </span>
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-zinc-400">총 증거금</span>
-            <span className="font-medium text-zinc-50">
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="shrink-0 whitespace-nowrap text-zinc-400">총 증거금</span>
+            <span className="min-w-0 text-right font-medium text-zinc-50">
               {formatUsdt(aggregate.totalMargin)}
             </span>
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-zinc-400">보유 포지션</span>
-            <span className="font-medium text-zinc-50">
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="shrink-0 whitespace-nowrap text-zinc-400">보유 포지션</span>
+            <span className="min-w-0 text-right font-medium text-zinc-50">
               {aggregate.openCount}/{MAX_OPEN_POSITIONS}
             </span>
           </div>
@@ -288,17 +292,17 @@ export default async function AccountPage({
                     {walletItems.map((tx, i) => (
                       <li
                         key={i}
-                        className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
+                        className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
                       >
-                        <div>
-                          <p className="text-sm font-medium text-zinc-100">
+                        <div className="shrink-0">
+                          <p className="whitespace-nowrap text-sm font-medium text-zinc-100">
                             {walletTransactionLabel(tx.type)}
                           </p>
-                          <p className="mt-1 text-xs text-zinc-500">
-                            {formatRelativeTime(tx.created_at)}
+                          <p className="mt-1 whitespace-nowrap text-xs text-zinc-500">
+                            {formatDateTime(tx.created_at)}
                           </p>
                         </div>
-                        <p className="text-right text-sm font-medium text-zinc-200">
+                        <p className="min-w-0 text-right text-sm font-medium text-zinc-200">
                           {walletTransactionSummary(tx)}
                         </p>
                       </li>

@@ -13,8 +13,8 @@ import { PriceChart } from "@/components/price-chart";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
 import { roePercent, toKrw, unrealizedPnl, type Side } from "@/lib/engine";
 import {
+  formatDateTime,
   formatKrw,
-  formatRelativeTime,
   formatSignedKrw,
   formatSignedUsdt,
   formatSymbol,
@@ -108,22 +108,22 @@ export function PositionCard({
       </div>
 
       <div className="mt-3 grid grid-cols-2 items-center gap-y-1.5 text-xs text-zinc-400">
-        <span>진입 시간</span>
-        <span className="text-right text-zinc-200">
-          {formatRelativeTime(position.opened_at)}
+        <span className="shrink-0 whitespace-nowrap">진입 시간</span>
+        <span className="min-w-0 text-right text-zinc-200">
+          {formatDateTime(position.opened_at)}
         </span>
-        <span>진입가</span>
-        <span className="text-right text-zinc-200">
+        <span className="shrink-0 whitespace-nowrap">진입가</span>
+        <span className="min-w-0 text-right text-zinc-200">
           {position.entry_price.toLocaleString("ko-KR", {
             maximumFractionDigits: 2,
           })}
         </span>
-        <span>수량</span>
-        <span className="text-right text-zinc-200">
+        <span className="shrink-0 whitespace-nowrap">수량</span>
+        <span className="min-w-0 text-right text-zinc-200">
           {position.qty.toFixed(6)}
         </span>
-        <span>증거금</span>
-        <span className="text-right leading-tight text-zinc-200">
+        <span className="shrink-0 whitespace-nowrap">증거금</span>
+        <span className="min-w-0 text-right leading-tight text-zinc-200">
           <span className="block">{formatUsdt(position.margin)}</span>
           {marginKrw != null && (
             <span className="block text-[11px] text-zinc-500">
@@ -131,8 +131,8 @@ export function PositionCard({
             </span>
           )}
         </span>
-        <span>현재가</span>
-        <span className="text-right text-zinc-200">
+        <span className="shrink-0 whitespace-nowrap">현재가</span>
+        <span className="min-w-0 text-right text-zinc-200">
           {markPrice != null
             ? markPrice.toLocaleString("ko-KR", { maximumFractionDigits: 2 })
             : "불러오는 중..."}
@@ -140,8 +140,8 @@ export function PositionCard({
       </div>
 
       <div className="mt-3 flex items-center justify-between rounded-lg bg-zinc-950/40 p-3">
-        <div>
-          <p className="text-xs text-zinc-400">미실현 손익</p>
+        <div className="min-w-0">
+          <p className="shrink-0 whitespace-nowrap text-xs text-zinc-400">미실현 손익</p>
           <p className={`text-base font-semibold ${pnlColorClassValue}`}>
             {pnl != null ? formatSignedUsdt(pnl) : "계산 중..."}
             {pnlKrw != null && (
@@ -151,8 +151,8 @@ export function PositionCard({
             )}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-zinc-400">ROE</p>
+        <div className="min-w-0 text-right">
+          <p className="whitespace-nowrap text-xs text-zinc-400">ROE</p>
           <p className={`text-base font-semibold ${pnlColorClassValue}`}>
             {roe != null ? `${roe > 0 ? "+" : ""}${roe.toFixed(2)}%` : "-"}
           </p>

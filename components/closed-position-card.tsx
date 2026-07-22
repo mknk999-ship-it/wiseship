@@ -1,6 +1,6 @@
 import { roePercent } from "@/lib/engine";
 import {
-  formatRelativeTime,
+  formatDateTime,
   formatSignedUsdt,
   formatSymbol,
   pnlColorClass,
@@ -59,14 +59,14 @@ export function ClosedPositionCard({
       </div>
 
       <div className="mt-3 flex items-center justify-between">
-        <div>
-          <p className="text-xs text-zinc-400">실현 손익</p>
+        <div className="min-w-0">
+          <p className="whitespace-nowrap text-xs text-zinc-400">실현 손익</p>
           <p className={`text-base font-semibold ${colorClass}`}>
             {formatSignedUsdt(pnl)}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-zinc-400">수익률</p>
+        <div className="min-w-0 text-right">
+          <p className="whitespace-nowrap text-xs text-zinc-400">수익률</p>
           <p className={`text-base font-semibold ${colorClass}`}>
             {roe > 0 ? "+" : ""}
             {roe.toFixed(2)}%
@@ -74,8 +74,8 @@ export function ClosedPositionCard({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center justify-between text-xs text-zinc-500">
-        <span>
+      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-zinc-500">
+        <span className="min-w-0">
           {position.entry_price.toLocaleString("ko-KR", {
             maximumFractionDigits: 2,
           })}
@@ -86,7 +86,9 @@ export function ClosedPositionCard({
               })
             : "—"}
         </span>
-        <span>{formatRelativeTime(position.closed_at)}</span>
+        <span className="shrink-0 whitespace-nowrap">
+          {formatDateTime(position.closed_at)}
+        </span>
       </div>
     </li>
   );

@@ -25,20 +25,20 @@ export function DashboardHeader({
         </Link>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="min-w-0 text-right">
+            <p className="whitespace-nowrap text-[10px] uppercase tracking-wide text-zinc-500">
               Trading
             </p>
-            <p className="text-sm font-semibold tabular-nums text-zinc-50">
+            <p className="whitespace-nowrap text-sm font-semibold tabular-nums text-zinc-50">
               {formatUsdt(tradingBalance)}
             </p>
           </div>
 
-          <div className="hidden text-right sm:block">
-            <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="hidden min-w-0 text-right sm:block">
+            <p className="whitespace-nowrap text-[10px] uppercase tracking-wide text-zinc-500">
               Funding
             </p>
-            <p className="text-sm font-semibold tabular-nums text-zinc-300">
+            <p className="whitespace-nowrap text-sm font-semibold tabular-nums text-zinc-300">
               {formatUsdtCompact(fundingBalance)}
             </p>
           </div>

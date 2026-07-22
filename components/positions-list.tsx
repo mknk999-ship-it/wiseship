@@ -140,9 +140,9 @@ export function PositionsList({
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <div>
-          <p className="text-xs text-zinc-400">총 미실현 손익</p>
+      <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="min-w-0">
+          <p className="whitespace-nowrap text-xs text-zinc-400">총 미실현 손익</p>
           <p className={`text-lg font-semibold ${pnlColorClass}`}>
             {formatSignedUsdt(totalPnl)}
             {totalPnlKrw != null && (
@@ -152,8 +152,8 @@ export function PositionsList({
             )}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-zinc-400">오픈 포지션</p>
+        <div className="min-w-0 text-right">
+          <p className="whitespace-nowrap text-xs text-zinc-400">오픈 포지션</p>
           <p className="text-lg font-semibold text-zinc-50">
             {initialPositions.length}/5
           </p>

@@ -16,26 +16,24 @@ function TotalAssetCard({
 }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-          {title}
+      <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        {title}
+      </p>
+      {titleExtra != null && (
+        <p className="mt-1 break-words text-2xl font-bold tabular-nums text-white">
+          {titleExtra}
         </p>
-        {titleExtra != null && (
-          <p className="text-xs font-medium tabular-nums text-zinc-300">
-            {titleExtra}
-          </p>
-        )}
-      </div>
-      <div className="space-y-1.5">{children}</div>
+      )}
+      <div className="mt-3 space-y-1.5">{children}</div>
     </div>
   );
 }
 
 function KrwRow({ label, krw }: { label: string; krw: number }) {
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-zinc-400">{label}</span>
-      <span className="font-medium tabular-nums text-zinc-50">
+    <div className="flex items-center justify-between gap-2 text-sm">
+      <span className="shrink-0 whitespace-nowrap text-zinc-400">{label}</span>
+      <span className="min-w-0 font-medium tabular-nums text-zinc-300">
         {formatKrw(krw)}
       </span>
     </div>
@@ -53,10 +51,10 @@ function UsdtRow({
 }) {
   const krw = rate != null ? usdt * rate : null;
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-zinc-400">{label}</span>
-      <span className="text-right">
-        <span className="font-medium tabular-nums text-zinc-50">
+    <div className="flex items-center justify-between gap-2 text-sm">
+      <span className="shrink-0 whitespace-nowrap text-zinc-400">{label}</span>
+      <span className="min-w-0 text-right">
+        <span className="font-medium tabular-nums text-zinc-300">
           {formatUsdt(usdt)}
         </span>
         {krw != null && (
@@ -150,7 +148,11 @@ export default async function DashboardPage() {
             titleExtra={
               <>
                 {formatUsdt(okxWalletUsdt)}
-                {okxWalletKrw != null && ` (${formatKrw(okxWalletKrw)})`}
+                {okxWalletKrw != null && (
+                  <span className="ml-1 text-base font-normal text-zinc-400">
+                    ({formatKrw(okxWalletKrw)})
+                  </span>
+                )}
               </>
             }
           >
