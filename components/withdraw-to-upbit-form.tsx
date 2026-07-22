@@ -2,48 +2,48 @@
 
 import { useActionState, useState } from "react";
 
-import { depositUpbitKrw, type MarginState } from "@/app/actions/margin";
+import { withdrawToUpbit, type MarginState } from "@/app/actions/margin";
 import {
   errorBoxClassName,
   inputClassName,
   maxButtonClassName,
   primaryButtonClassName,
 } from "@/components/ui";
-import { MAX_DEPOSIT_KRW } from "@/lib/margin";
+import { formatUsdt } from "@/lib/format";
 
 const initialState: MarginState = {};
 
-export function DepositForm() {
+export function WithdrawToUpbitForm({ funding }: { funding: number }) {
   const [state, action, pending] = useActionState(
-    depositUpbitKrw,
+    withdrawToUpbit,
     initialState,
   );
   const [display, setDisplay] = useState("");
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const digits = e.target.value.replace(/[^0-9]/g, "");
-    setDisplay(digits ? Number(digits).toLocaleString("ko-KR") : "");
+    setDisplay(e.target.value.replace(/[^0-9.]/g, ""));
   }
 
   function handleMax() {
-    setDisplay(MAX_DEPOSIT_KRW.toLocaleString("ko-KR"));
+    setDisplay(String(funding));
   }
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} className="space-y-3">
       <div>
         <label
-          htmlFor="amount"
+          htmlFor="funding-withdraw-amount"
           className="mb-1.5 block text-sm font-medium text-zinc-300"
         >
-          입금액 (원)
+          출금할 금액 (USDT)
         </label>
         <div className="relative">
           <input
-            id="amount"
+            id="funding-withdraw-amount"
+            name="amount"
             type="text"
-            inputMode="numeric"
-            placeholder="100만원 ~ 1억원"
+            inputMode="decimal"
+            placeholder={`최대 ${formatUsdt(funding)}`}
             value={display}
             onChange={handleChange}
             className={`${inputClassName} pr-16`}
@@ -57,13 +57,12 @@ export function DepositForm() {
             MAX
           </button>
         </div>
-        <input type="hidden" name="amount" value={display.replace(/,/g, "")} />
       </div>
 
       {state.error && <p className={errorBoxClassName}>{state.error}</p>}
 
       <button type="submit" disabled={pending} className={primaryButtonClassName}>
-        {pending ? "처리 중..." : "입금"}
+        {pending ? "처리 중..." : "업비트로 출금"}
       </button>
     </form>
   );

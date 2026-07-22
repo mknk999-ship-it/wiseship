@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { href: "/dashboard/positions", label: "포지션 현황" },
   { href: "/dashboard/wallet", label: "지갑 관리" },
   { href: "/dashboard/ranking", label: "랭킹" },
+  { href: "/dashboard/account", label: "내 계좌" },
 ];
 
 export function NavMenu({

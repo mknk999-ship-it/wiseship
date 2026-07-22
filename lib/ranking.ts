@@ -1,4 +1,5 @@
 import { unrealizedPnl, type Side } from "@/lib/engine";
+import { calcTotalEquity } from "@/lib/equity";
 import { getOkxMarkPrice, type Symbol } from "@/lib/prices";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -98,8 +99,11 @@ async function computeSnapshot(): Promise<RankingSnapshot> {
   const entries: InternalEntry[] = rows.map((r) => {
     const margin = marginByUser.get(r.user_id) ?? 0;
     const pnl = pnlByUser.get(r.user_id) ?? 0;
-    const totalAssets =
-      r.okx_trading_usdt + r.okx_funding_usdt + r.upbit_usdt + margin + pnl;
+    const totalAssets = calcTotalEquity({
+      walletBalance: r.okx_trading_usdt + r.okx_funding_usdt + r.upbit_usdt,
+      totalMargin: margin,
+      totalUnrealizedPnl: pnl,
+    });
     const profit = totalAssets - r.initial_usdt;
     const returnPct = (profit / r.initial_usdt) * 100;
     return {

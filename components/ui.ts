@@ -6,3 +6,6 @@ export const primaryButtonClassName =
 
 export const errorBoxClassName =
   "rounded-lg border border-red-900/50 bg-red-950/40 px-4 py-3 text-sm text-red-300";
+
+export const maxButtonClassName =
+  "absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-zinc-700 px-2.5 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-600";

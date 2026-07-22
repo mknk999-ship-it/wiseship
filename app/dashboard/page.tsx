@@ -2,13 +2,69 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { formatKrw, formatUsdt } from "@/lib/format";
+import { getUsdtKrw } from "@/lib/prices";
 import { createClient } from "@/lib/supabase/server";
 
-function BalanceCard({ label, value }: { label: string; value: string }) {
+function TotalAssetCard({
+  title,
+  titleExtra,
+  children,
+}: {
+  title: string;
+  titleExtra?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <p className="text-xs text-zinc-400">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-zinc-50">{value}</p>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+          {title}
+        </p>
+        {titleExtra != null && (
+          <p className="text-xs font-medium tabular-nums text-zinc-300">
+            {titleExtra}
+          </p>
+        )}
+      </div>
+      <div className="space-y-1.5">{children}</div>
+    </div>
+  );
+}
+
+function KrwRow({ label, krw }: { label: string; krw: number }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-zinc-400">{label}</span>
+      <span className="font-medium tabular-nums text-zinc-50">
+        {formatKrw(krw)}
+      </span>
+    </div>
+  );
+}
+
+function UsdtRow({
+  label,
+  usdt,
+  rate,
+}: {
+  label: string;
+  usdt: number;
+  rate: number | null;
+}) {
+  const krw = rate != null ? usdt * rate : null;
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-zinc-400">{label}</span>
+      <span className="text-right">
+        <span className="font-medium tabular-nums text-zinc-50">
+          {formatUsdt(usdt)}
+        </span>
+        {krw != null && (
+          <span className="ml-1 text-xs font-normal text-zinc-500">
+            ({formatKrw(krw)})
+          </span>
+        )}
+      </span>
     </div>
   );
 }
@@ -37,8 +93,24 @@ export default async function DashboardPage() {
     .eq("user_id", user.id)
     .single();
 
+  let rate: number | null = null;
+  try {
+    rate = await getUsdtKrw();
+  } catch {
+    rate = null;
+  }
+
   const nickname = profile?.nickname ?? "사용자";
   const setupComplete = (account?.initial_usdt ?? 0) !== 0;
+
+  const upbitKrw = account?.upbit_krw ?? 0;
+  const upbitUsdt = account?.upbit_usdt ?? 0;
+  const okxFunding = account?.okx_funding_usdt ?? 0;
+  const okxTrading = account?.okx_trading_usdt ?? 0;
+  const okxWalletUsdt = okxFunding + okxTrading;
+
+  const upbitTotalKrw = rate != null ? upbitKrw + upbitUsdt * rate : null;
+  const okxWalletKrw = rate != null ? okxWalletUsdt * rate : null;
 
   return (
     <div className="flex flex-1 items-center justify-center px-4 py-12">
@@ -65,20 +137,26 @@ export default async function DashboardPage() {
           </Link>
         )}
 
-        <div className="mt-8 grid grid-cols-2 gap-3">
-          <BalanceCard label="업비트 KRW" value={formatKrw(account?.upbit_krw ?? 0)} />
-          <BalanceCard
-            label="업비트 USDT"
-            value={formatUsdt(account?.upbit_usdt ?? 0)}
-          />
-          <BalanceCard
-            label="OKX Funding"
-            value={formatUsdt(account?.okx_funding_usdt ?? 0)}
-          />
-          <BalanceCard
-            label="OKX Trading"
-            value={formatUsdt(account?.okx_trading_usdt ?? 0)}
-          />
+        <div className="mt-8 space-y-3">
+          <TotalAssetCard
+            title="업비트 총자산"
+            titleExtra={upbitTotalKrw != null ? formatKrw(upbitTotalKrw) : undefined}
+          >
+            <KrwRow label="KRW" krw={upbitKrw} />
+            <UsdtRow label="USDT" usdt={upbitUsdt} rate={rate} />
+          </TotalAssetCard>
+          <TotalAssetCard
+            title="OKX 총자산"
+            titleExtra={
+              <>
+                {formatUsdt(okxWalletUsdt)}
+                {okxWalletKrw != null && ` (${formatKrw(okxWalletKrw)})`}
+              </>
+            }
+          >
+            <UsdtRow label="Funding" usdt={okxFunding} rate={rate} />
+            <UsdtRow label="Trading" usdt={okxTrading} rate={rate} />
+          </TotalAssetCard>
         </div>
 
         {setupComplete && (

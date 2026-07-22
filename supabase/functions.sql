@@ -583,6 +583,93 @@ grant execute on function close_position(
 -- Supabase 린터의 "Security Definer View" CRITICAL 경고 해소.
 drop view if exists public.rankings;
 
+-- ===== 지갑 관리: 출금(역방향) 플로우 =====
+-- 입금 플로우(deposit_upbit_krw → buy_usdt_all → transfer_to_okx_funding)의 역순.
+-- 1회성 마법사가 아니라 wallet_transfer처럼 금액을 직접 입력하는 반복 가능한 이체이므로
+-- initial_krw/initial_usdt 같은 완료 플래그는 두지 않는다.
+
+create or replace function withdraw_to_upbit(p_amount numeric)
+returns void
+language plpgsql
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_funding numeric;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'invalid_amount';
+  end if;
+
+  select okx_funding_usdt into v_funding
+    from accounts where user_id = v_uid for update;
+
+  if v_funding is null then
+    raise exception 'account_not_found';
+  end if;
+  if p_amount > v_funding then
+    raise exception 'insufficient_balance';
+  end if;
+
+  update accounts
+    set okx_funding_usdt = okx_funding_usdt - p_amount,
+        upbit_usdt = upbit_usdt + p_amount
+    where user_id = v_uid;
+
+  insert into transactions (user_id, type, detail)
+    values (v_uid, 'okx_withdraw', jsonb_build_object('usdt_amount', p_amount));
+end;
+$$;
+
+-- p_rate는 호출부(Next.js 서버 액션)가 getUsdtKrw()로 그 순간 재조회한 값만 받는다.
+-- 클라이언트가 화면에 보여준 환율을 그대로 신뢰하지 않기 위함(buy_usdt_all과 동일한 이유).
+create or replace function sell_usdt_to_krw(p_amount numeric, p_rate numeric)
+returns void
+language plpgsql
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_usdt numeric;
+  v_krw numeric;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'invalid_amount';
+  end if;
+  if p_rate is null or p_rate <= 0 then
+    raise exception 'invalid_rate';
+  end if;
+
+  select upbit_usdt into v_usdt
+    from accounts where user_id = v_uid for update;
+
+  if v_usdt is null then
+    raise exception 'account_not_found';
+  end if;
+  if p_amount > v_usdt then
+    raise exception 'insufficient_balance';
+  end if;
+
+  v_krw := round(p_amount * p_rate);
+
+  update accounts
+    set upbit_usdt = upbit_usdt - p_amount,
+        upbit_krw = upbit_krw + v_krw
+    where user_id = v_uid;
+
+  insert into transactions (user_id, type, detail)
+    values (
+      v_uid,
+      'usdt_sell',
+      jsonb_build_object('usdt_amount', p_amount, 'rate', p_rate, 'krw_amount', v_krw)
+    );
+end;
+$$;
+
 -- ===== 버그 수정: close_position/open_position 옛 오버로드 제거 =====
 -- CREATE OR REPLACE FUNCTION은 파라미터 개수가 바뀌면 기존 함수를 덮어쓰지 않고
 -- 별도 오버로드로 추가해버림. p_reason(close_position)/p_tp_price·p_sl_price(open_position)를
@@ -597,3 +684,128 @@ drop function if exists close_position(
 drop function if exists open_position(
   uuid, text, text, numeric, numeric, numeric, numeric, numeric, numeric, numeric
 );
+
+-- ===== 보안 강화: sell_usdt_to_krw를 open_position/close_position과 동일하게 서비스롤 전용으로 잠금 =====
+-- 기존 sell_usdt_to_krw(p_amount, p_rate)는 SECURITY INVOKER + authenticated 실행 권한이
+-- 있어서, Next.js를 거치지 않고 사용자가 자기 JWT로 직접 이 RPC를 호출하면 p_rate에
+-- 임의의 값(예: 비정상적으로 높은 환율)을 넣어 원화를 부풀릴 수 있는 구멍이 있었다.
+--
+-- open_position/close_position이 이미 쓰고 있는 패턴을 그대로 적용해서 막는다:
+-- auth.uid() 대신 p_user_id를 명시적으로 받고, authenticated/anon 실행 권한을 revoke해서
+-- SUPABASE_SERVICE_ROLE_KEY로만(즉 Next.js 서버 액션에서만) 호출 가능하게 한다.
+-- 서버 액션은 이미 이 호출 직전에 getUsdtKrw()로 환율을 직접 재조회해서 넘기고 있으므로
+-- (클라이언트가 화면에 보여준 값이 아니라), 이 RPC를 직접 호출할 방법 자체를 없애면
+-- p_rate가 진짜로 "그 순간 서버가 조회한 값"이라는 게 보장된다.
+--
+-- rates 테이블에 주기적으로 시세를 적재해두고 RPC가 그걸 읽게 하는 방식(요청받은 "방법 A")도
+-- 고려했지만, 그러려면 새 테이블 + 별도 주기 실행 크론/Edge Function이 필요해서 배포 부담이
+-- 크다. 오차범위 검증(방법 B) 역시 결국 같은 "서버가 기록해둔 최신 환율"이 있어야 비교가
+-- 가능해서 인프라 부담은 동일하다. 반면 이 방식은 새 인프라 없이, 이미 이 저장소에 있는
+-- open_position/close_position과 완전히 같은 신뢰 모델을 재사용한다.
+drop function if exists sell_usdt_to_krw(numeric, numeric);
+
+create or replace function sell_usdt_to_krw(
+  p_user_id uuid,
+  p_amount numeric,
+  p_rate numeric
+)
+returns void
+language plpgsql
+as $$
+declare
+  v_usdt numeric;
+  v_krw numeric;
+begin
+  if p_user_id is null then
+    raise exception 'not_authenticated';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'invalid_amount';
+  end if;
+  if p_rate is null or p_rate <= 0 then
+    raise exception 'invalid_rate';
+  end if;
+
+  select upbit_usdt into v_usdt
+    from accounts where user_id = p_user_id for update;
+
+  if v_usdt is null then
+    raise exception 'account_not_found';
+  end if;
+  if p_amount > v_usdt then
+    raise exception 'insufficient_balance';
+  end if;
+
+  v_krw := round(p_amount * p_rate);
+
+  update accounts
+    set upbit_usdt = upbit_usdt - p_amount,
+        upbit_krw = upbit_krw + v_krw
+    where user_id = p_user_id;
+
+  insert into transactions (user_id, type, detail)
+    values (
+      p_user_id,
+      'usdt_sell',
+      jsonb_build_object('usdt_amount', p_amount, 'rate', p_rate, 'krw_amount', v_krw)
+    );
+end;
+$$;
+
+revoke all on function sell_usdt_to_krw(uuid, numeric, numeric) from public;
+revoke all on function sell_usdt_to_krw(uuid, numeric, numeric) from anon;
+revoke all on function sell_usdt_to_krw(uuid, numeric, numeric) from authenticated;
+grant execute on function sell_usdt_to_krw(uuid, numeric, numeric) to service_role;
+
+-- ===== 보안 강화: buy_usdt_all도 동일한 이유로 서비스롤 전용으로 잠금 =====
+-- sell_usdt_to_krw와 완전히 같은 취약점: 기존 buy_usdt_all(p_rate)는 SECURITY INVOKER +
+-- authenticated 실행 권한이 있어서, 사용자가 자기 JWT로 직접 호출하며 p_rate에 비정상적으로
+-- 낮은 값을 넣으면 실제보다 훨씬 많은 USDT를 받아갈 수 있었다. open_position/close_position/
+-- sell_usdt_to_krw와 동일한 패턴으로 잠근다.
+drop function if exists buy_usdt_all(numeric);
+
+create or replace function buy_usdt_all(p_user_id uuid, p_rate numeric)
+returns void
+language plpgsql
+as $$
+declare
+  v_krw numeric;
+  v_usdt numeric;
+begin
+  if p_user_id is null then
+    raise exception 'not_authenticated';
+  end if;
+  if p_rate is null or p_rate <= 0 then
+    raise exception 'invalid_rate';
+  end if;
+
+  select upbit_krw into v_krw
+    from accounts where user_id = p_user_id for update;
+
+  if v_krw is null then
+    raise exception 'account_not_found';
+  end if;
+  if v_krw <= 0 then
+    raise exception 'no_balance';
+  end if;
+
+  v_usdt := round(v_krw / p_rate, 2);
+
+  update accounts
+    set upbit_krw = 0,
+        upbit_usdt = upbit_usdt + v_usdt
+    where user_id = p_user_id;
+
+  insert into transactions (user_id, type, detail)
+    values (
+      p_user_id,
+      'usdt_buy',
+      jsonb_build_object('krw_amount', v_krw, 'rate', p_rate, 'usdt_amount', v_usdt)
+    );
+end;
+$$;
+
+revoke all on function buy_usdt_all(uuid, numeric) from public;
+revoke all on function buy_usdt_all(uuid, numeric) from anon;
+revoke all on function buy_usdt_all(uuid, numeric) from authenticated;
+grant execute on function buy_usdt_all(uuid, numeric) to service_role;

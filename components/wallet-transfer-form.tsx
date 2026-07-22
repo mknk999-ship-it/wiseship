@@ -6,6 +6,7 @@ import { walletTransfer, type MarginState } from "@/app/actions/margin";
 import {
   errorBoxClassName,
   inputClassName,
+  maxButtonClassName,
   primaryButtonClassName,
 } from "@/components/ui";
 import { formatUsdt, formatUsdtAmount } from "@/lib/format";
@@ -32,6 +33,10 @@ export function WalletTransferForm({
 
   function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
     setDisplay(e.target.value.replace(/[^0-9.]/g, ""));
+  }
+
+  function handleMax() {
+    setDisplay(String(sourceBalance));
   }
 
   return (
@@ -90,17 +95,26 @@ export function WalletTransferForm({
         >
           이체 금액 (USDT)
         </label>
-        <input
-          id="wallet-amount"
-          name="amount"
-          type="text"
-          inputMode="decimal"
-          placeholder={`최대 ${formatUsdt(sourceBalance)}`}
-          value={display}
-          onChange={handleAmountChange}
-          className={inputClassName}
-          required
-        />
+        <div className="relative">
+          <input
+            id="wallet-amount"
+            name="amount"
+            type="text"
+            inputMode="decimal"
+            placeholder={`최대 ${formatUsdt(sourceBalance)}`}
+            value={display}
+            onChange={handleAmountChange}
+            className={`${inputClassName} pr-16`}
+            required
+          />
+          <button
+            type="button"
+            onClick={handleMax}
+            className={maxButtonClassName}
+          >
+            MAX
+          </button>
+        </div>
       </div>
 
       {state.error && <p className={errorBoxClassName}>{state.error}</p>}
