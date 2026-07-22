@@ -1,8 +1,33 @@
+import { TAKER_FEE } from "@/lib/engine";
 import type { Side } from "@/lib/engine";
 import type { Symbol } from "@/lib/prices";
 
 export function isValidSymbol(value: string): value is Symbol {
   return value === "BTC-USDT-SWAP" || value === "ETH-USDT-SWAP";
+}
+
+// 100% 진입 시 수수료까지 포함해 실제로 체결 가능한 최대 증거금.
+// 소수 2자리 내림 + 부동소수점 오차 대비 안전버퍼(0.01 USDT)를 뺀다.
+const MAX_MARGIN_SAFETY_BUFFER = 0.01;
+
+function floorTo2(value: number): number {
+  return Math.floor(value * 100) / 100;
+}
+
+/**
+ * 클라이언트(증거금 비율 버튼 미리보기)와 서버(주문 처리 액션) 양쪽에서
+ * 동일한 잔고를 넣고 호출해야 같은 결과가 나온다. 서버에서 호출할 때는
+ * 항상 그 시점에 새로 조회한 계정 잔고를 넘겨서, 클라이언트가 들고 있던
+ * (페이지 로드 시점의) 잔고와 어긋나도 체결 실패로 이어지지 않게 한다.
+ */
+export function maxAffordableMargin(balance: number, leverage: number): number {
+  if (!Number.isFinite(balance) || balance <= 0) return 0;
+  if (!Number.isFinite(leverage) || leverage <= 0) return 0;
+
+  const raw = balance / (1 + leverage * TAKER_FEE);
+  const floored = floorTo2(raw);
+  const buffered = floorTo2(floored - MAX_MARGIN_SAFETY_BUFFER);
+  return Math.max(0, buffered);
 }
 
 export type TpSlCheck = {

@@ -1,19 +1,27 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 
 import { openPositionAction, type TradeState } from "@/app/actions/trade";
+import { PriceChart } from "@/components/price-chart";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
 import {
   MAX_LEVERAGE,
-  TAKER_FEE,
   openPosition,
+  toKrw,
   unrealizedPnl,
   type Side,
 } from "@/lib/engine";
-import { formatSignedUsdt, formatSymbol, formatUsdt } from "@/lib/format";
-import { subscribeMarkPrice, type Symbol } from "@/lib/prices";
-import { validateTpSl } from "@/lib/trade";
+import {
+  formatSignedKrw,
+  formatSignedUsdt,
+  formatSymbol,
+  formatUsdt,
+  pnlColorClass,
+} from "@/lib/format";
+import type { OpenPosition } from "@/lib/positions";
+import { getUsdtKrw, subscribeMarkPrice, type Symbol } from "@/lib/prices";
+import { maxAffordableMargin, validateTpSl } from "@/lib/trade";
 
 const initialState: TradeState = {};
 
@@ -28,10 +36,10 @@ type Flash = "up" | "down" | null;
 
 export function TradePanel({
   initialTradingBalance,
-  initialOpenPositionCount,
+  openPositions,
 }: {
   initialTradingBalance: number;
-  initialOpenPositionCount: number;
+  openPositions: OpenPosition[];
 }) {
   const [state, formAction, pending] = useActionState(
     openPositionAction,
@@ -54,6 +62,8 @@ export function TradePanel({
   const [leverage, setLeverage] = useState(10);
   const [tpDisplay, setTpDisplay] = useState("");
   const [slDisplay, setSlDisplay] = useState("");
+  const [usdtKrwRate, setUsdtKrwRate] = useState<number | null>(null);
+  const [marginIsMax, setMarginIsMax] = useState(false);
 
   useEffect(() => {
     const unsubscribe = subscribeMarkPrice(SYMBOLS, (sym, price) => {
@@ -80,8 +90,31 @@ export function TradePanel({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchRate() {
+      try {
+        const rate = await getUsdtKrw();
+        if (!cancelled) setUsdtKrwRate(rate);
+      } catch {
+        // 실패 시 마지막으로 알려진 환율을 그대로 유지
+      }
+    }
+    fetchRate();
+    const interval = setInterval(fetchRate, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   const margin = Number(marginDisplay.replace(/,/g, ""));
   const markPrice = prices[symbol];
+
+  const chartPositions = useMemo(
+    () => openPositions.filter((p) => p.symbol === symbol),
+    [openPositions, symbol],
+  );
 
   const preview =
     markPrice != null && margin > 0
@@ -92,22 +125,31 @@ export function TradePanel({
           leverage,
           markPrice,
           tradingBalance: initialTradingBalance,
-          openPositionCount: initialOpenPositionCount,
+          openPositionCount: openPositions.length,
         })
       : null;
 
   function handleMarginChange(e: React.ChangeEvent<HTMLInputElement>) {
     const digits = e.target.value.replace(/[^0-9.]/g, "");
     setMarginDisplay(digits);
+    setMarginIsMax(false);
   }
 
   function handleMarginPreset(pct: number) {
+    const cap = maxAffordableMargin(initialTradingBalance, leverage);
     const amount =
-      pct === 1
-        ? floorTo2(initialTradingBalance / (1 + leverage * TAKER_FEE))
-        : floorTo2(initialTradingBalance * pct);
+      pct === 1 ? cap : Math.min(floorTo2(initialTradingBalance * pct), cap);
     setMarginDisplay(amount > 0 ? String(amount) : "");
+    setMarginIsMax(pct === 1);
   }
+
+  // 100%(수수료 포함 최대 증거금) 선택 상태에서 레버리지를 바꾸면
+  // 증거금을 그 레버리지 기준으로 다시 계산한다.
+  useEffect(() => {
+    if (!marginIsMax) return;
+    const cap = maxAffordableMargin(initialTradingBalance, leverage);
+    setMarginDisplay(cap > 0 ? String(cap) : "");
+  }, [leverage, marginIsMax, initialTradingBalance]);
 
   const tpPrice = tpDisplay === "" ? null : Number(tpDisplay);
   const slPrice = slDisplay === "" ? null : Number(slDisplay);
@@ -129,6 +171,10 @@ export function TradePanel({
     preview?.ok && slPrice != null && entryPrice != null
       ? unrealizedPnl(side, entryPrice, slPrice, qty)
       : null;
+  const tpPnlKrw =
+    tpPnl != null && usdtKrwRate != null ? toKrw(tpPnl, usdtKrwRate) : null;
+  const slPnlKrw =
+    slPnl != null && usdtKrwRate != null ? toKrw(slPnl, usdtKrwRate) : null;
 
   const symbolFlash = flash[symbol];
   const priceColorClass =
@@ -146,7 +192,7 @@ export function TradePanel({
     !tpSlCheck.slError;
 
   return (
-    <div className="w-full max-w-sm space-y-6">
+    <div className="w-full max-w-xl space-y-6">
       <div className="flex rounded-lg bg-zinc-800/60 p-1">
         {SYMBOLS.map((s) => (
           <button
@@ -164,22 +210,26 @@ export function TradePanel({
         ))}
       </div>
 
-      <div className="text-center">
-        <p className="text-sm text-zinc-400">마크가격</p>
-        <p
-          className={`mt-1 text-3xl font-semibold tabular-nums transition-colors ${priceColorClass}`}
-        >
-          {markPrice != null
-            ? markPrice.toLocaleString("ko-KR", { maximumFractionDigits: 2 })
-            : "불러오는 중..."}
-        </p>
-      </div>
+      <PriceChart symbol={symbol} markPrice={markPrice} positions={chartPositions} />
 
-      <form action={formAction} className="space-y-5">
+      <div className="mx-auto w-full max-w-sm space-y-6">
+        <div className="text-center">
+          <p className="text-sm text-zinc-400">마크가격</p>
+          <p
+            className={`mt-1 text-3xl font-semibold tabular-nums transition-colors ${priceColorClass}`}
+          >
+            {markPrice != null
+              ? markPrice.toLocaleString("ko-KR", { maximumFractionDigits: 2 })
+              : "불러오는 중..."}
+          </p>
+        </div>
+
+        <form action={formAction} className="space-y-5">
         <input type="hidden" name="symbol" value={symbol} />
         <input type="hidden" name="side" value={side} />
         <input type="hidden" name="margin" value={margin || ""} />
         <input type="hidden" name="leverage" value={leverage} />
+        <input type="hidden" name="useMax" value={marginIsMax ? "1" : ""} />
         <input type="hidden" name="tpPrice" value={tpPrice ?? ""} />
         <input type="hidden" name="slPrice" value={slPrice ?? ""} />
 
@@ -236,6 +286,11 @@ export function TradePanel({
               </button>
             ))}
           </div>
+          {marginIsMax && (
+            <p className="mt-1 text-xs text-zinc-500">
+              수수료 반영 최대 진입 금액
+            </p>
+          )}
         </div>
 
         <div>
@@ -282,8 +337,11 @@ export function TradePanel({
               className={inputClassName}
             />
             {tpPnl != null && !tpSlCheck.tpError && (
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className={`mt-1 text-xs ${pnlColorClass(tpPnl, "text-zinc-500")}`}>
                 도달 시 {formatSignedUsdt(tpPnl)}
+                {tpPnlKrw != null && (
+                  <span className="ml-1">({formatSignedKrw(tpPnlKrw)})</span>
+                )}
               </p>
             )}
             {tpSlCheck.tpError && (
@@ -310,8 +368,11 @@ export function TradePanel({
               className={inputClassName}
             />
             {slPnl != null && !tpSlCheck.slError && (
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className={`mt-1 text-xs ${pnlColorClass(slPnl, "text-zinc-500")}`}>
                 도달 시 {formatSignedUsdt(slPnl)}
+                {slPnlKrw != null && (
+                  <span className="ml-1">({formatSignedKrw(slPnlKrw)})</span>
+                )}
               </p>
             )}
             {tpSlCheck.slError && (
@@ -340,6 +401,7 @@ export function TradePanel({
                 value={(preview.liqPrice ?? 0).toLocaleString("ko-KR", {
                   maximumFractionDigits: 2,
                 })}
+                valueClassName="text-amber-400 font-bold"
               />
             </>
           ) : (
@@ -363,16 +425,25 @@ export function TradePanel({
         >
           {pending ? "처리 중..." : side === "long" ? "롱 진입" : "숏 진입"}
         </button>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  valueClassName = "font-medium text-zinc-50",
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-zinc-400">{label}</span>
-      <span className="font-medium tabular-nums text-zinc-50">{value}</span>
+      <span className={`tabular-nums ${valueClassName}`}>{value}</span>
     </div>
   );
 }

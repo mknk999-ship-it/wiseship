@@ -9,6 +9,7 @@ import {
   type CloseState,
   type TpSlState,
 } from "@/app/actions/trade";
+import { PriceChart } from "@/components/price-chart";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
 import { roePercent, toKrw, unrealizedPnl, type Side } from "@/lib/engine";
 import {
@@ -18,6 +19,7 @@ import {
   formatSignedUsdt,
   formatSymbol,
   formatUsdt,
+  pnlColorClass,
 } from "@/lib/format";
 import type { OpenPosition } from "@/lib/positions";
 import { validateTpSl } from "@/lib/trade";
@@ -42,6 +44,7 @@ export function PositionCard({
   );
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [tpSlModalOpen, setTpSlModalOpen] = useState(false);
+  const [chartOpen, setChartOpen] = useState(false);
 
   useEffect(() => {
     if (state.success) {
@@ -67,14 +70,7 @@ export function PositionCard({
   const nearLiquidation =
     liqDistance != null && liqDistance <= LIQ_WARNING_THRESHOLD;
 
-  const pnlColorClass =
-    pnl == null
-      ? "text-zinc-50"
-      : pnl > 0
-        ? "text-emerald-400"
-        : pnl < 0
-          ? "text-red-400"
-          : "text-zinc-50";
+  const pnlColorClassValue = pnl == null ? "text-zinc-50" : pnlColorClass(pnl);
 
   if (state.success) {
     return (
@@ -146,7 +142,7 @@ export function PositionCard({
       <div className="mt-3 flex items-center justify-between rounded-lg bg-zinc-950/40 p-3">
         <div>
           <p className="text-xs text-zinc-400">미실현 손익</p>
-          <p className={`text-base font-semibold ${pnlColorClass}`}>
+          <p className={`text-base font-semibold ${pnlColorClassValue}`}>
             {pnl != null ? formatSignedUsdt(pnl) : "계산 중..."}
             {pnlKrw != null && (
               <span className="ml-1 text-xs font-normal text-zinc-500">
@@ -157,14 +153,14 @@ export function PositionCard({
         </div>
         <div className="text-right">
           <p className="text-xs text-zinc-400">ROE</p>
-          <p className={`text-base font-semibold ${pnlColorClass}`}>
+          <p className={`text-base font-semibold ${pnlColorClassValue}`}>
             {roe != null ? `${roe > 0 ? "+" : ""}${roe.toFixed(2)}%` : "-"}
           </p>
         </div>
       </div>
 
       <div className="mt-2 flex items-center justify-between text-xs">
-        <span className="text-zinc-500">
+        <span className="font-bold text-amber-400">
           청산가 {position.liq_price.toLocaleString("ko-KR", {
             maximumFractionDigits: 2,
           })}
@@ -210,16 +206,55 @@ export function PositionCard({
         <TpSlEditor
           position={position}
           markPrice={markPrice}
+          usdtKrwRate={usdtKrwRate}
           onClose={() => setTpSlModalOpen(false)}
         />
       ) : (
-        <button
-          type="button"
-          onClick={() => setTpSlModalOpen(true)}
-          className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 text-xs font-medium text-zinc-300 transition hover:border-zinc-600"
-        >
-          TP/SL 설정
-        </button>
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setTpSlModalOpen(true)}
+            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 py-2 text-xs font-medium text-zinc-300 transition hover:border-zinc-600"
+          >
+            TP/SL 설정
+          </button>
+          <button
+            type="button"
+            onClick={() => setChartOpen(true)}
+            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 py-2 text-xs font-medium text-zinc-300 transition hover:border-zinc-600"
+          >
+            차트 보기
+          </button>
+        </div>
+      )}
+
+      {chartOpen && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setChartOpen(false)}
+          />
+          <div className="relative w-full max-w-xl rounded-xl border border-zinc-800 bg-zinc-950 p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-semibold text-zinc-50">
+                {formatSymbol(position.symbol)} 차트
+              </span>
+              <button
+                type="button"
+                onClick={() => setChartOpen(false)}
+                aria-label="차트 닫기"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition hover:text-zinc-100"
+              >
+                ✕
+              </button>
+            </div>
+            <PriceChart
+              symbol={position.symbol}
+              markPrice={markPrice}
+              positions={[position]}
+            />
+          </div>
+        </div>
       )}
 
       {!confirmOpen ? (
@@ -264,10 +299,12 @@ export function PositionCard({
 function TpSlEditor({
   position,
   markPrice,
+  usdtKrwRate,
   onClose,
 }: {
   position: OpenPosition;
   markPrice: number | null;
+  usdtKrwRate: number | null;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -304,6 +341,14 @@ function TpSlEditor({
     slValue != null
       ? unrealizedPnl(side, position.entry_price, slValue, position.qty)
       : null;
+  const tpPreviewKrw =
+    tpPreviewPnl != null && usdtKrwRate != null
+      ? toKrw(tpPreviewPnl, usdtKrwRate)
+      : null;
+  const slPreviewKrw =
+    slPreviewPnl != null && usdtKrwRate != null
+      ? toKrw(slPreviewPnl, usdtKrwRate)
+      : null;
 
   return (
     <div className="mt-2 space-y-3 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3">
@@ -330,8 +375,11 @@ function TpSlEditor({
           className={inputClassName}
         />
         {tpPreviewPnl != null && !tpSlCheck.tpError && (
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className={`mt-1 text-xs ${pnlColorClass(tpPreviewPnl, "text-zinc-500")}`}>
             도달 시 {formatSignedUsdt(tpPreviewPnl)}
+            {tpPreviewKrw != null && (
+              <span className="ml-1">({formatSignedKrw(tpPreviewKrw)})</span>
+            )}
           </p>
         )}
         {tpSlCheck.tpError && (
@@ -362,8 +410,11 @@ function TpSlEditor({
           className={inputClassName}
         />
         {slPreviewPnl != null && !tpSlCheck.slError && (
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className={`mt-1 text-xs ${pnlColorClass(slPreviewPnl, "text-zinc-500")}`}>
             도달 시 {formatSignedUsdt(slPreviewPnl)}
+            {slPreviewKrw != null && (
+              <span className="ml-1">({formatSignedKrw(slPreviewKrw)})</span>
+            )}
           </p>
         )}
         {tpSlCheck.slError && (

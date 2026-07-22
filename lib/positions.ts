@@ -28,3 +28,18 @@ export async function getOpenPositionCount(
     .eq("status", "open");
   return count ?? 0;
 }
+
+export async function getOpenPositions(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<OpenPosition[]> {
+  const { data } = await supabase
+    .from("positions")
+    .select(
+      "id, symbol, side, margin, leverage, qty, entry_price, liq_price, tp_price, sl_price, opened_at",
+    )
+    .eq("user_id", userId)
+    .eq("status", "open")
+    .order("opened_at", { ascending: false });
+  return (data ?? []) as OpenPosition[];
+}

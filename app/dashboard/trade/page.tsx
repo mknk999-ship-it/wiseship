@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { TradePanel } from "@/components/trade-panel";
-import { getOpenPositionCount } from "@/lib/positions";
+import { getOpenPositions } from "@/lib/positions";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function TradePage() {
@@ -20,13 +20,13 @@ export default async function TradePage() {
   if (!account) redirect("/dashboard");
   if (account.initial_usdt === 0) redirect("/dashboard/margin-setup");
 
-  const openPositionCount = await getOpenPositionCount(supabase, user.id);
+  const openPositions = await getOpenPositions(supabase, user.id);
 
   return (
-    <div className="flex flex-1 items-center justify-center px-4 py-12">
+    <div className="flex flex-1 flex-col items-center gap-6 px-4 py-6">
       <TradePanel
         initialTradingBalance={account.okx_trading_usdt}
-        initialOpenPositionCount={openPositionCount}
+        openPositions={openPositions}
       />
     </div>
   );

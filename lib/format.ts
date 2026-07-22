@@ -41,6 +41,12 @@ export function formatSignedKrw(amount: number): string {
   return `${sign(amount)}${formatKrw(Math.abs(amount))}`;
 }
 
+export function pnlColorClass(pnl: number, neutral = "text-zinc-50"): string {
+  if (pnl > 0) return "text-emerald-400";
+  if (pnl < 0) return "text-red-400";
+  return neutral;
+}
+
 export function formatSymbol(symbol: Symbol | string): string {
   return symbol.replace(/-USDT-SWAP$/, "");
 }

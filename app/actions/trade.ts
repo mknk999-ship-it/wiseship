@@ -14,7 +14,12 @@ import { getOpenPositionCount } from "@/lib/positions";
 import { getOkxMarkPrice, getUsdtKrw } from "@/lib/prices";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { isValidSymbol, mapTradeError, validateTpSl } from "@/lib/trade";
+import {
+  isValidSymbol,
+  mapTradeError,
+  maxAffordableMargin,
+  validateTpSl,
+} from "@/lib/trade";
 
 export type TradeState = {
   error?: string;
@@ -34,6 +39,7 @@ export async function openPositionAction(
   const sideInput = formData.get("side") as string;
   const margin = Number(formData.get("margin"));
   const leverage = Number(formData.get("leverage"));
+  const useMax = formData.get("useMax") === "1";
   const tpPrice = parseOptionalNumber(formData.get("tpPrice"));
   const slPrice = parseOptionalNumber(formData.get("slPrice"));
 
@@ -70,6 +76,17 @@ export async function openPositionAction(
     return { error: "계정 정보를 확인할 수 없습니다. 다시 로그인해주세요." };
   }
 
+  // useMax(100% 진입)일 때는 클라이언트가 보낸 margin을 신뢰하지 않고,
+  // 지금 막 조회한 서버 잔고 기준으로 수수료 포함 최대 증거금을 다시 계산한다.
+  // 페이지 로드 시점의 클라이언트 잔고와 실제 잔고가 어긋나 있어도 체결 실패로
+  // 이어지지 않도록 하기 위함.
+  const effectiveMargin = useMax
+    ? maxAffordableMargin(account.okx_trading_usdt, leverage)
+    : margin;
+  if (!Number.isFinite(effectiveMargin) || effectiveMargin <= 0) {
+    return { error: "trading 잔고가 부족합니다. (증거금 + 수수료)" };
+  }
+
   const openPositionCount = await getOpenPositionCount(supabase, user.id);
 
   let markPrice: number;
@@ -82,7 +99,7 @@ export async function openPositionAction(
   const result = openPosition({
     symbol,
     side,
-    margin,
+    margin: effectiveMargin,
     leverage,
     markPrice,
     tradingBalance: account.okx_trading_usdt,
@@ -108,7 +125,7 @@ export async function openPositionAction(
     p_user_id: user.id,
     p_symbol: symbol,
     p_side: side,
-    p_margin: margin,
+    p_margin: effectiveMargin,
     p_leverage: leverage,
     p_entry_price: result.entryPrice,
     p_qty: result.qty,
