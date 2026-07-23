@@ -1135,3 +1135,48 @@ begin
     where user_id = v_uid;
 end;
 $$;
+
+-- ===== 온보딩 간소화: 마법사(3단계) RPC 제거, 고정 지급 RPC로 대체 =====
+-- 기존 "업비트 입금(직접 금액) → 전액 USDT 매수 → OKX Funding 송금" 3단계 마법사를
+-- "증거금 1,000만원 받기" 버튼 하나로 대체하면서 마법사 전용 RPC 3개를 제거한다.
+-- buy_usdt/deposit_to_okx_funding 등 지갑 관리가 쓰는 공유 RPC는 그대로 둔다.
+drop function if exists deposit_upbit_krw(numeric);
+drop function if exists buy_usdt_all(uuid, numeric);
+drop function if exists transfer_to_okx_funding();
+
+-- 지급액은 파라미터로 받지 않고 함수 내부 상수로 고정 — 클라이언트가 절대 못 바꾸게 한다.
+-- open_position/close_position과 동일한 이유로 서비스롤 전용(클라이언트 직접 호출 차단).
+-- initial_krw를 그대로 "이미 지급받음" 플래그로 재사용한다(기존 deposit_upbit_krw와 동일한
+-- 패턴). for update 행 잠금으로 버튼 연타·동시 요청에도 정확히 1회만 지급됨을 보장한다.
+create or replace function grant_initial_margin(p_user_id uuid)
+returns void
+language plpgsql
+as $$
+declare
+  v_amount constant numeric := 10000000;
+  v_initial_krw numeric;
+begin
+  select initial_krw into v_initial_krw
+    from accounts where user_id = p_user_id for update;
+
+  if v_initial_krw is null then
+    raise exception 'account_not_found';
+  end if;
+  if v_initial_krw <> 0 then
+    raise exception 'already_granted';
+  end if;
+
+  update accounts
+    set upbit_krw = v_amount,
+        initial_krw = v_amount
+    where user_id = p_user_id;
+
+  insert into transactions (user_id, type, detail)
+    values (p_user_id, 'initial_margin_grant', jsonb_build_object('amount_krw', v_amount));
+end;
+$$;
+
+revoke all on function grant_initial_margin(uuid) from public;
+revoke all on function grant_initial_margin(uuid) from anon;
+revoke all on function grant_initial_margin(uuid) from authenticated;
+grant execute on function grant_initial_margin(uuid) to service_role;

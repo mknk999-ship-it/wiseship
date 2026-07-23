@@ -13,12 +13,12 @@ export default async function WalletPage() {
 
   const { data: account } = await supabase
     .from("accounts")
-    .select("okx_funding_usdt, okx_trading_usdt, upbit_usdt, upbit_krw, initial_usdt")
+    .select("okx_funding_usdt, okx_trading_usdt, upbit_usdt, upbit_krw, initial_krw")
     .eq("user_id", user.id)
     .single();
 
   if (!account) redirect("/dashboard");
-  if (account.initial_usdt === 0) redirect("/dashboard/margin-setup");
+  if (account.initial_krw === 0) redirect("/dashboard/margin-setup");
 
   let rate: number | null = null;
   try {

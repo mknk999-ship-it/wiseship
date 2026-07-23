@@ -3,22 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { mapMarginError, validateDepositAmount, validateTransferAmount } from "@/lib/margin";
+import { mapMarginError, validateTransferAmount } from "@/lib/margin";
 import { getUsdtKrw } from "@/lib/prices";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export type MarginState = {
   error?: string;
+  success?: boolean;
 };
 
 /**
- * 환율이 개입하는 RPC(buy_usdt/buy_usdt_all/sell_usdt_to_krw) 공통 처리:
+ * 환율이 개입하는 RPC(buy_usdt/sell_usdt_to_krw) 공통 처리:
  * 서버가 그 순간 재조회한 환율만 신뢰하고, service_role로만 호출 가능한
  * RPC를 대신 호출한 뒤 에러를 매핑한다.
  */
 async function callRateRpc(
-  rpcName: "buy_usdt" | "buy_usdt_all" | "sell_usdt_to_krw",
+  rpcName: "buy_usdt" | "sell_usdt_to_krw",
   params: Record<string, unknown>,
 ): Promise<MarginState> {
   let rate: number;
@@ -62,25 +63,13 @@ function resolveAmount(
   return { amount: clientAmount };
 }
 
-export async function depositUpbitKrw(
-  _prevState: MarginState,
-  formData: FormData,
-): Promise<MarginState> {
-  const amount = Number(formData.get("amount"));
-  const validationError = validateDepositAmount(amount);
-  if (validationError) return { error: validationError };
-
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("deposit_upbit_krw", {
-    p_amount: amount,
-  });
-  if (error) return { error: mapMarginError(error, "deposit_upbit_krw") };
-
-  revalidatePath("/dashboard", "layout");
-  redirect("/dashboard/margin-setup");
-}
-
-export async function buyUsdtAll(
+/**
+ * 회원가입 온보딩: 전원에게 고정 금액(INITIAL_MARGIN_KRW)을 업비트 원화 잔고로 1회
+ * 지급한다. redirect() 대신 성공 상태를 반환하는 이유는, 클라이언트가 "입금되었습니다"
+ * 안내를 보여준 뒤 대시보드로 이동해야 하기 때문(즉시 리다이렉트하면 안내를 못 봄).
+ * 중복 지급 방지는 grant_initial_margin RPC의 행 잠금 + initial_krw 플래그가 담당한다.
+ */
+export async function grantInitialMargin(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _prevState: MarginState,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -94,11 +83,14 @@ export async function buyUsdtAll(
     return { error: "계정 정보를 확인할 수 없습니다. 다시 로그인해주세요." };
   }
 
-  const result = await callRateRpc("buy_usdt_all", { p_user_id: user.id });
-  if (result.error) return result;
+  const serviceClient = createServiceClient();
+  const { error } = await serviceClient.rpc("grant_initial_margin", {
+    p_user_id: user.id,
+  });
+  if (error) return { error: mapMarginError(error, "grant_initial_margin") };
 
   revalidatePath("/dashboard", "layout");
-  redirect("/dashboard/margin-setup");
+  return { success: true };
 }
 
 export async function buyUsdt(
@@ -137,20 +129,6 @@ export async function buyUsdt(
 
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard/wallet?tab=upbit&done=buy_usdt");
-}
-
-export async function transferToOkxFunding(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _prevState: MarginState,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _formData: FormData,
-): Promise<MarginState> {
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("transfer_to_okx_funding");
-  if (error) return { error: mapMarginError(error, "transfer_to_okx_funding") };
-
-  revalidatePath("/dashboard", "layout");
-  redirect("/dashboard");
 }
 
 export async function walletTransfer(

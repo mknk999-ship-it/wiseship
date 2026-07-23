@@ -1,15 +1,6 @@
-export const MIN_DEPOSIT_KRW = 1_000_000;
-export const MAX_DEPOSIT_KRW = 100_000_000;
-
-export function validateDepositAmount(amount: number): string | null {
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return "입금액을 입력해주세요.";
-  }
-  if (amount < MIN_DEPOSIT_KRW || amount > MAX_DEPOSIT_KRW) {
-    return "입금액은 100만원 이상 1억원 이하여야 합니다.";
-  }
-  return null;
-}
+// 회원가입 온보딩에서 전원에게 고정으로 지급하는 증거금(원화). 랭킹 수익률 계산의
+// 기준값으로도 재사용한다(lib/ranking.ts).
+export const INITIAL_MARGIN_KRW = 10_000_000;
 
 export function validateTransferAmount(
   amount: number,
@@ -72,6 +63,9 @@ export function mapMarginError(error: MarginRpcError, context: string): string {
   }
   if (m.includes("already_finalized")) {
     return "이미 OKX 송금을 완료했습니다.";
+  }
+  if (m.includes("already_granted")) {
+    return "이미 증거금을 받았습니다.";
   }
   if (m.includes("invalid_direction")) {
     return "잘못된 이체 방향입니다.";

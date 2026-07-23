@@ -13,12 +13,12 @@ export default async function TradePage() {
 
   const { data: account } = await supabase
     .from("accounts")
-    .select("okx_trading_usdt, initial_usdt")
+    .select("okx_trading_usdt, initial_krw")
     .eq("user_id", user.id)
     .single();
 
   if (!account) redirect("/dashboard");
-  if (account.initial_usdt === 0) redirect("/dashboard/margin-setup");
+  if (account.initial_krw === 0) redirect("/dashboard/margin-setup");
 
   const openPositions = await getOpenPositions(supabase, user.id);
 

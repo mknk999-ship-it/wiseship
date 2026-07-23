@@ -76,7 +76,7 @@ function RankingRow({
   entry: RankingEntry;
   usdtKrwRate: number | null;
 }) {
-  const krw = usdtKrwRate != null ? entry.profit * usdtKrwRate : null;
+  const usdt = usdtKrwRate != null ? entry.profit / usdtKrwRate : null;
   const medal = entry.rank <= 3 ? MEDAL[entry.rank - 1] : null;
   const profitColorClass =
     entry.profit > 0
@@ -104,10 +104,10 @@ function RankingRow({
       </div>
       <div className="text-right">
         <p className={`text-sm font-semibold ${profitColorClass}`}>
-          {formatSignedUsdt(entry.profit)}
+          {formatSignedKrw(entry.profit)}
         </p>
         <p className="text-xs text-zinc-500">
-          {krw != null && `${formatSignedKrw(krw)} · `}
+          {usdt != null && `${formatSignedUsdt(usdt)} · `}
           {entry.returnPct > 0 ? "+" : ""}
           {entry.returnPct.toFixed(2)}%
         </p>

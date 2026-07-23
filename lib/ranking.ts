@@ -1,6 +1,7 @@
 import { unrealizedPnl, type Side } from "@/lib/engine";
 import { calcTotalEquity } from "@/lib/equity";
-import { getOkxMarkPrice, type Symbol } from "@/lib/prices";
+import { INITIAL_MARGIN_KRW } from "@/lib/margin";
+import { getOkxMarkPrice, getUsdtKrw, type Symbol } from "@/lib/prices";
 import { createServiceClient } from "@/lib/supabase/service";
 
 const CACHE_TTL_MS = 30_000;
@@ -36,13 +37,22 @@ type RankingSnapshot = {
 
 let cache: RankingSnapshot | null = null;
 
-async function computeSnapshot(): Promise<RankingSnapshot> {
+async function computeSnapshot(): Promise<RankingSnapshot | null> {
+  // 전체 계정을 한 스냅샷으로 원화 환산하므로 유저별이 아니라 딱 한 번만 조회한다.
+  // 실패하면 이번 스냅샷 계산 자체를 포기하고(null), 호출부가 기존 캐시를 그대로 쓴다.
+  let rate: number;
+  try {
+    rate = await getUsdtKrw();
+  } catch {
+    return null;
+  }
+
   const supabase = createServiceClient();
 
   const { data: accounts } = await supabase
     .from("accounts")
-    .select("user_id, okx_trading_usdt, okx_funding_usdt, upbit_usdt, initial_usdt")
-    .gt("initial_usdt", 0);
+    .select("user_id, okx_trading_usdt, okx_funding_usdt, upbit_usdt, upbit_krw, initial_krw")
+    .gt("initial_krw", 0);
 
   const rows = accounts ?? [];
   if (rows.length === 0) {
@@ -96,16 +106,21 @@ async function computeSnapshot(): Promise<RankingSnapshot> {
     }
   }
 
+  // 총자산은 원화로 환산해 계산한다: 전원 기준값이 고정 1,000만원(INITIAL_MARGIN_KRW)이고,
+  // 온보딩 직후에는 자산 대부분이 upbit_krw(원화 미전환)에 머무를 수 있어 USDT 컬럼 합만
+  // 보면 총자산이 0으로 잡히는 문제가 있었다. USDT 쪽 합계는 기존과 동일하게
+  // calcTotalEquity로 구한 뒤, 그 순간의 환율로 원화 환산해 upbit_krw와 합산한다.
   const entries: InternalEntry[] = rows.map((r) => {
     const margin = marginByUser.get(r.user_id) ?? 0;
     const pnl = pnlByUser.get(r.user_id) ?? 0;
-    const totalAssets = calcTotalEquity({
+    const totalEquityUsdt = calcTotalEquity({
       walletBalance: r.okx_trading_usdt + r.okx_funding_usdt + r.upbit_usdt,
       totalMargin: margin,
       totalUnrealizedPnl: pnl,
     });
-    const profit = totalAssets - r.initial_usdt;
-    const returnPct = (profit / r.initial_usdt) * 100;
+    const totalAssets = r.upbit_krw + totalEquityUsdt * rate;
+    const profit = totalAssets - INITIAL_MARGIN_KRW;
+    const returnPct = (profit / INITIAL_MARGIN_KRW) * 100;
     return {
       userId: r.user_id,
       nickname: nicknameByUser.get(r.user_id) ?? "익명",
@@ -126,7 +141,12 @@ async function getSnapshot(): Promise<RankingSnapshot> {
   if (cache && Date.now() - cache.computedAt < CACHE_TTL_MS) {
     return cache;
   }
-  cache = await computeSnapshot();
+  const fresh = await computeSnapshot();
+  if (fresh) {
+    cache = fresh;
+  } else if (!cache) {
+    cache = { byProfit: [], byReturn: [], computedAt: Date.now() };
+  }
   return cache;
 }
 

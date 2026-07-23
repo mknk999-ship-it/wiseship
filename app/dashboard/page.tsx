@@ -86,7 +86,7 @@ export default async function DashboardPage() {
   const { data: account } = await supabase
     .from("accounts")
     .select(
-      "upbit_krw, upbit_usdt, okx_funding_usdt, okx_trading_usdt, initial_usdt",
+      "upbit_krw, upbit_usdt, okx_funding_usdt, okx_trading_usdt, initial_krw",
     )
     .eq("user_id", user.id)
     .single();
@@ -99,7 +99,7 @@ export default async function DashboardPage() {
   }
 
   const nickname = profile?.nickname ?? "사용자";
-  const setupComplete = (account?.initial_usdt ?? 0) !== 0;
+  const setupComplete = (account?.initial_krw ?? 0) !== 0;
 
   const upbitKrw = account?.upbit_krw ?? 0;
   const upbitUsdt = account?.upbit_usdt ?? 0;
@@ -124,13 +124,13 @@ export default async function DashboardPage() {
             className="mt-8 block rounded-2xl border-2 border-dashed border-zinc-600 bg-zinc-900/60 p-6 text-center transition hover:border-zinc-400"
           >
             <p className="text-lg font-semibold text-zinc-50">
-              증거금 설정을 시작해주세요
+              증거금 1,000만원을 받아보세요
             </p>
             <p className="mt-2 text-sm text-zinc-400">
-              실전 거래를 위해 초기 자금을 준비해야 해요
+              실전 거래를 위해 초기 자금을 받아야 해요
             </p>
             <span className="mt-4 inline-block rounded-lg bg-zinc-100 px-6 py-2 text-sm font-semibold text-zinc-900">
-              증거금 설정 시작
+              증거금 받기
             </span>
           </Link>
         )}
