@@ -6,6 +6,7 @@ import {
   LineStyle,
   createChart,
   type CandlestickData,
+  type IChartApi,
   type IPriceLine,
   type ISeriesApi,
   type UTCTimestamp,
@@ -13,10 +14,12 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  MAX_CANDLE_LIMIT,
   TIMEFRAMES,
   TIMEFRAME_LABEL,
   bucketStart,
   getOkxCandles,
+  getOkxHistoricalCandles,
   type CandleBar,
   type Timeframe,
 } from "@/lib/candles";
@@ -57,6 +60,9 @@ type ChartLabel = {
   color: string;
 };
 
+// 왼쪽 끝(가장 과거)에서 이만큼 봉 이내로 가까워지면 다음 과거 구간을 미리 불러온다.
+const LOAD_MORE_THRESHOLD_BARS = 20;
+
 export function PriceChart({
   symbol,
   markPrice,
@@ -67,6 +73,7 @@ export function PriceChart({
   positions: OpenPosition[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const lastBarRef = useRef<CandleBar | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -76,6 +83,15 @@ export function PriceChart({
   const [timeframe, setTimeframe] = useState<Timeframe>("1m");
   const [loading, setLoading] = useState(true);
   const [labels, setLabels] = useState<ChartLabel[]>([]);
+
+  // 무한 스크롤(과거 구간 이어받기) 상태. 구독 자체는 마운트 시 한 번만 설정되므로
+  // symbol/timeframe이 바뀔 때마다 최신값을 담아두는 용도로 ref를 쓴다.
+  const barsRef = useRef<CandleBar[]>([]);
+  const loadingMoreRef = useRef(false);
+  const exhaustedRef = useRef(false);
+  const symbolForLoadMoreRef = useRef(symbol);
+  const timeframeForLoadMoreRef = useRef(timeframe);
+  const generationRef = useRef(0);
 
   const recomputeLabels = useCallback(() => {
     const series = seriesRef.current;
@@ -165,10 +181,75 @@ export function PriceChart({
       wickDownColor: "#f87171",
     });
 
+    chartRef.current = chart;
     seriesRef.current = series;
 
-    const handleVisibleRangeChange = () => recomputeLabels();
+    const handleVisibleRangeChange = () => {
+      recomputeLabels();
+      maybeLoadMoreHistory();
+    };
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+
+    // 왼쪽 끝(가장 과거)에 가까워지면 다음 과거 구간을 이어 받아 앞에 붙인다.
+    // symbol/timeframe이 바뀌어도 이 구독은 마운트 동안 유지되므로, 최신 값은
+    // 항상 ref(symbolForLoadMoreRef 등)에서 읽는다.
+    function maybeLoadMoreHistory() {
+      const chartApi = chartRef.current;
+      const series = seriesRef.current;
+      if (!chartApi || !series) return;
+      if (loadingMoreRef.current || exhaustedRef.current) return;
+      if (barsRef.current.length === 0) return;
+
+      const range = chartApi.timeScale().getVisibleLogicalRange();
+      if (!range || range.from > LOAD_MORE_THRESHOLD_BARS) return;
+
+      const oldest = barsRef.current[0];
+      const sym = symbolForLoadMoreRef.current;
+      const tf = timeframeForLoadMoreRef.current;
+      const generation = generationRef.current;
+
+      loadingMoreRef.current = true;
+      getOkxHistoricalCandles(sym, tf, oldest.time * 1000)
+        .then((older) => {
+          // 응답이 오는 동안 심볼/타임프레임이 바뀌었으면 이 결과는 버린다.
+          if (generation !== generationRef.current) return;
+
+          if (older.length === 0) {
+            exhaustedRef.current = true;
+            return;
+          }
+
+          const existingTimes = new Set(barsRef.current.map((b) => b.time));
+          const merged = [
+            ...older.filter((b) => !existingTimes.has(b.time)),
+            ...barsRef.current,
+          ].sort((a, b) => a.time - b.time);
+          const prependedCount = merged.length - barsRef.current.length;
+          barsRef.current = merged;
+
+          const chartApiNow = chartRef.current;
+          const seriesNow = seriesRef.current;
+          if (!chartApiNow || !seriesNow || prependedCount <= 0) return;
+
+          // setData는 화면을 초기화하므로, 직전 보이던 논리 범위를 새로 앞에 붙은
+          // 봉 개수만큼 밀어서 다시 지정해야 스크롤 위치가 튀지 않는다.
+          const currentRange = chartApiNow.timeScale().getVisibleLogicalRange();
+          seriesNow.setData(merged.map(toBarData));
+          if (currentRange) {
+            chartApiNow.timeScale().setVisibleLogicalRange({
+              from: currentRange.from + prependedCount,
+              to: currentRange.to + prependedCount,
+            });
+          }
+          recomputeLabels();
+        })
+        .catch(() => {
+          // 일시적 오류일 수 있으므로 exhaustedRef는 그대로 두고, 다음 스크롤에서 재시도한다.
+        })
+        .finally(() => {
+          loadingMoreRef.current = false;
+        });
+    }
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -185,6 +266,7 @@ export function PriceChart({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
       resizeObserver.disconnect();
       chart.remove();
+      chartRef.current = null;
       seriesRef.current = null;
       lastBarRef.current = null;
       priceLinesRef.current = [];
@@ -195,11 +277,20 @@ export function PriceChart({
     let cancelled = false;
     setLoading(true);
 
-    getOkxCandles(symbol, timeframe)
+    // 심볼/타임프레임이 바뀌면 무한 스크롤로 쌓아온 과거 구간은 버리고 새로 시작한다.
+    symbolForLoadMoreRef.current = symbol;
+    timeframeForLoadMoreRef.current = timeframe;
+    barsRef.current = [];
+    loadingMoreRef.current = false;
+    exhaustedRef.current = false;
+    generationRef.current += 1;
+
+    getOkxCandles(symbol, timeframe, MAX_CANDLE_LIMIT)
       .then((bars) => {
         if (cancelled) return;
         const series = seriesRef.current;
         if (!series) return;
+        barsRef.current = bars;
         series.setData(bars.map(toBarData));
         lastBarRef.current = bars[bars.length - 1] ?? null;
         recomputeLabels();

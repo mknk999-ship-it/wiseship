@@ -1,6 +1,7 @@
 // lib/candles.ts
 // 차트용 캔들 데이터: OKX 마크가격 캔들(REST) 조회.
 // 청산가/PnL이 마크가격 기준이라 체결가 캔들 대신 mark-price-candles를 사용해 기준을 일치시킨다.
+// 과거 구간(무한 스크롤)도 같은 이유로 history-candles가 아니라 history-mark-price-candles를 쓴다.
 // prices.ts와 동일하게 브라우저에서 직접 호출한다(퍼블릭 API, cache: "no-store").
 
 import type { Symbol } from "@/lib/prices";
@@ -47,18 +48,10 @@ export type CandleBar = {
   close: number;
 };
 
-export async function getOkxCandles(
-  symbol: Symbol,
-  timeframe: Timeframe,
-  limit = 200,
-): Promise<CandleBar[]> {
-  const res = await fetch(
-    `https://www.okx.com/api/v5/market/mark-price-candles?instId=${symbol}&bar=${timeframe}&limit=${limit}`,
-    { cache: "no-store" },
-  );
-  const json = await res.json();
-  const rows: string[][] = json.data ?? [];
+// OKX 마크가격 캔들 엔드포인트(라이브·히스토리 공통)의 실측 최대 limit.
+export const MAX_CANDLE_LIMIT = 300;
 
+function parseCandleRows(rows: string[][]): CandleBar[] {
   return rows
     .map((row) => ({
       time: Math.floor(Number(row[0]) / 1000),
@@ -68,4 +61,37 @@ export async function getOkxCandles(
       close: parseFloat(row[4]),
     }))
     .reverse();
+}
+
+export async function getOkxCandles(
+  symbol: Symbol,
+  timeframe: Timeframe,
+  limit: number = MAX_CANDLE_LIMIT,
+): Promise<CandleBar[]> {
+  const res = await fetch(
+    `https://www.okx.com/api/v5/market/mark-price-candles?instId=${symbol}&bar=${timeframe}&limit=${limit}`,
+    { cache: "no-store" },
+  );
+  const json = await res.json();
+  return parseCandleRows(json.data ?? []);
+}
+
+/**
+ * 무한 스크롤로 더 과거 구간을 이어 받을 때 쓰는 히스토리 캔들 조회.
+ * beforeMs(ms epoch)보다 과거 데이터를 반환한다 — OKX의 `after` 파라미터가
+ * "이 시각보다 이전 데이터"를 의미한다(신규→과거 순으로 페이지네이션하는 이름이라
+ * 다소 헷갈리지만, 실제 호출로 겹침·공백 없이 이어짐을 확인했다).
+ */
+export async function getOkxHistoricalCandles(
+  symbol: Symbol,
+  timeframe: Timeframe,
+  beforeMs: number,
+  limit: number = MAX_CANDLE_LIMIT,
+): Promise<CandleBar[]> {
+  const res = await fetch(
+    `https://www.okx.com/api/v5/market/history-mark-price-candles?instId=${symbol}&bar=${timeframe}&after=${beforeMs}&limit=${limit}`,
+    { cache: "no-store" },
+  );
+  const json = await res.json();
+  return parseCandleRows(json.data ?? []);
 }
