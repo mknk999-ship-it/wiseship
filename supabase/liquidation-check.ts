@@ -183,6 +183,9 @@ Deno.serve(async (req) => {
       p_close_fee: result.closeFee,
       p_realized: result.realized,
       p_return_to_balance: result.returnToBalance,
+      p_closed_qty: position.qty,
+      p_closed_margin: position.margin,
+      p_is_full_close: true,
       p_reason: tpHit ? "tp" : "sl",
     });
 

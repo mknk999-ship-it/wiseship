@@ -15,9 +15,11 @@ import { getOkxMarkPrice, getUsdtKrw } from "@/lib/prices";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
+  isValidCloseRatio,
   isValidSymbol,
   mapTradeError,
   maxAffordableMargin,
+  resolvePartialClose,
   validateTpSl,
 } from "@/lib/trade";
 
@@ -147,6 +149,10 @@ export type CloseState = {
   success?: boolean;
   realizedPnl?: number;
   realizedKrw?: number | null;
+  isFullClose?: boolean;
+  closeRatio?: number;
+  remainingQty?: number | null;
+  remainingMargin?: number | null;
 };
 
 export async function closePositionAction(
@@ -156,6 +162,11 @@ export async function closePositionAction(
   const positionId = formData.get("positionId") as string;
   if (!positionId) {
     return { error: "포지션을 찾을 수 없습니다." };
+  }
+
+  const closeRatio = Number(formData.get("closeRatio"));
+  if (!isValidCloseRatio(closeRatio)) {
+    return { error: "잘못된 종료 비율입니다." };
   }
 
   const supabase = await createClient();
@@ -188,12 +199,18 @@ export async function closePositionAction(
     return { error: "시세를 불러오지 못했습니다." };
   }
 
+  const { closedQty, closedMargin, isFullClose } = resolvePartialClose(
+    position.qty,
+    position.margin,
+    closeRatio,
+  );
+
   const result = closePosition(
     position.side as Side,
     position.entry_price,
     markPrice,
-    position.qty,
-    position.margin,
+    closedQty,
+    closedMargin,
   );
 
   const serviceClient = createServiceClient();
@@ -204,6 +221,9 @@ export async function closePositionAction(
     p_close_fee: result.closeFee,
     p_realized: result.realized,
     p_return_to_balance: result.returnToBalance,
+    p_closed_qty: closedQty,
+    p_closed_margin: closedMargin,
+    p_is_full_close: isFullClose,
   });
 
   if (error) {
@@ -218,7 +238,15 @@ export async function closePositionAction(
     realizedKrw = null;
   }
 
-  return { success: true, realizedPnl: result.realized, realizedKrw };
+  return {
+    success: true,
+    realizedPnl: result.realized,
+    realizedKrw,
+    isFullClose,
+    closeRatio,
+    remainingQty: isFullClose ? null : position.qty - closedQty,
+    remainingMargin: isFullClose ? null : position.margin - closedMargin,
+  };
 }
 
 export type TpSlState = {
@@ -376,6 +404,9 @@ export async function settleCheckAction(
     p_close_fee: result.closeFee,
     p_realized: result.realized,
     p_return_to_balance: result.returnToBalance,
+    p_closed_qty: position.qty,
+    p_closed_margin: position.margin,
+    p_is_full_close: true,
     p_reason: tpHit ? "tp" : "sl",
   });
 

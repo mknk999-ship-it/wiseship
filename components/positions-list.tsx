@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { settleCheckAction } from "@/app/actions/trade";
-import { PositionCard, SettledNotice } from "@/components/position-card";
+import { PositionCard, SettledNotice, type CloseResult } from "@/components/position-card";
 import { isLiquidated, unrealizedPnl } from "@/lib/engine";
 import { formatSignedKrw, formatSignedUsdt } from "@/lib/format";
 import type { OpenPosition } from "@/lib/positions";
@@ -13,8 +13,16 @@ import { getUsdtKrw, subscribeMarkPrice, type Symbol } from "@/lib/prices";
 
 const SYMBOLS: Symbol[] = ["BTC-USDT-SWAP", "ETH-USDT-SWAP"];
 const KRW_POLL_INTERVAL_MS = 30000;
+const TOAST_DURATION_MS = 4000;
 
 type AutoSettled = {
+  label: string;
+  realizedPnl: number;
+  realizedKrw: number | null;
+};
+
+type Toast = {
+  id: number;
   label: string;
   realizedPnl: number;
   realizedKrw: number | null;
@@ -32,16 +40,35 @@ export function PositionsList({
   initialPositions: OpenPosition[];
 }) {
   const router = useRouter();
+  const [positions, setPositions] = useState(initialPositions);
   const [prices, setPrices] = useState<Record<string, number | null>>({});
   const [usdtKrwRate, setUsdtKrwRate] = useState<number | null>(null);
   const [autoSettled, setAutoSettled] = useState<Record<string, AutoSettled>>(
     {},
   );
+  const [toast, setToast] = useState<Toast | null>(null);
 
-  const positionsRef = useRef(initialPositions);
+  // initialPositions는 TP/SL 저장·자동 정산 등 다른 흐름이 router.refresh()로
+  // 새로 내려줄 때만 참조가 바뀐다. 수동 포지션 종료(부분/전체)는 아래
+  // handleClosed가 이 로컬 state를 직접 갱신하므로 별도 refetch가 필요 없다.
+  // 렌더 중 비교로 동기화한다 (React 공식 권장 패턴: prop이 바뀌면 state를 조정).
+  const [handledInitialPositions, setHandledInitialPositions] =
+    useState(initialPositions);
+  if (initialPositions !== handledInitialPositions) {
+    setHandledInitialPositions(initialPositions);
+    setPositions(initialPositions);
+  }
+
   useEffect(() => {
-    positionsRef.current = initialPositions;
-  }, [initialPositions]);
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), TOAST_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const positionsRef = useRef(positions);
+  useEffect(() => {
+    positionsRef.current = positions;
+  }, [positions]);
 
   // 같은 포지션에 중복으로 settleCheckAction을 호출하지 않기 위한 플래그.
   // 정산 성공 시에도 지우지 않아 재트리거를 막고, 서버가 "아직 아니다"라고
@@ -111,21 +138,31 @@ export function PositionsList({
     };
   }, []);
 
-  if (initialPositions.length === 0) {
-    return (
-      <div className="text-center">
-        <p className="text-sm text-zinc-400">보유 중인 포지션이 없어요.</p>
-        <Link
-          href="/dashboard/trade"
-          className="mt-4 inline-block rounded-lg bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white"
-        >
-          트레이드하러 가기
-        </Link>
-      </div>
+  function handleClosed(position: OpenPosition, result: CloseResult) {
+    setPositions((prev) =>
+      result.isFullClose
+        ? prev.filter((p) => p.id !== position.id)
+        : prev.map((p) =>
+            p.id === position.id
+              ? {
+                  ...p,
+                  qty: result.remainingQty ?? p.qty,
+                  margin: result.remainingMargin ?? p.margin,
+                }
+              : p,
+          ),
     );
+    setToast({
+      id: Date.now(),
+      label: result.isFullClose
+        ? "청산 완료"
+        : `${Math.round(result.closeRatio * 100)}% 종료 완료`,
+      realizedPnl: result.realizedPnl,
+      realizedKrw: result.realizedKrw,
+    });
   }
 
-  const totalPnl = initialPositions.reduce((sum, p) => {
+  const totalPnl = positions.reduce((sum, p) => {
     const mark = prices[p.symbol];
     if (mark == null) return sum;
     return sum + unrealizedPnl(p.side, p.entry_price, mark, p.qty);
@@ -140,57 +177,82 @@ export function PositionsList({
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <div className="min-w-0">
-          <p className="whitespace-nowrap text-xs text-zinc-400">총 미실현 손익</p>
-          <p className={`text-lg font-semibold ${pnlColorClass}`}>
-            {formatSignedUsdt(totalPnl)}
-            {totalPnlKrw != null && (
-              <span className="ml-1 text-xs font-normal text-zinc-500">
-                ({formatSignedKrw(totalPnlKrw)})
-              </span>
-            )}
-          </p>
+      {toast && (
+        <div className="mb-4">
+          <SettledNotice
+            label={toast.label}
+            realizedPnl={toast.realizedPnl}
+            realizedKrw={toast.realizedKrw}
+          />
         </div>
-        <div className="min-w-0 text-right">
-          <p className="whitespace-nowrap text-xs text-zinc-400">오픈 포지션</p>
-          <p className="text-lg font-semibold text-zinc-50">
-            {initialPositions.length}/5
-          </p>
-        </div>
-      </div>
+      )}
 
-      <ul className="space-y-3">
-        {initialPositions.map((p) => {
-          const settled = autoSettled[p.id];
-          if (settled) {
-            return (
-              <li key={p.id}>
-                <SettledNotice
-                  label={settled.label}
-                  realizedPnl={settled.realizedPnl}
-                  realizedKrw={settled.realizedKrw}
+      {positions.length === 0 ? (
+        <div className="text-center">
+          <p className="text-sm text-zinc-400">보유 중인 포지션이 없어요.</p>
+          <Link
+            href="/dashboard/trade"
+            className="mt-4 inline-block rounded-lg bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white"
+          >
+            트레이드하러 가기
+          </Link>
+        </div>
+      ) : (
+        <>
+          <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="min-w-0">
+              <p className="whitespace-nowrap text-xs text-zinc-400">총 미실현 손익</p>
+              <p className={`text-lg font-semibold ${pnlColorClass}`}>
+                {formatSignedUsdt(totalPnl)}
+                {totalPnlKrw != null && (
+                  <span className="ml-1 text-xs font-normal text-zinc-500">
+                    ({formatSignedKrw(totalPnlKrw)})
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="min-w-0 text-right">
+              <p className="whitespace-nowrap text-xs text-zinc-400">오픈 포지션</p>
+              <p className="text-lg font-semibold text-zinc-50">
+                {positions.length}/5
+              </p>
+            </div>
+          </div>
+
+          <ul className="space-y-3">
+            {positions.map((p) => {
+              const settled = autoSettled[p.id];
+              if (settled) {
+                return (
+                  <li key={p.id}>
+                    <SettledNotice
+                      label={settled.label}
+                      realizedPnl={settled.realizedPnl}
+                      realizedKrw={settled.realizedKrw}
+                    />
+                  </li>
+                );
+              }
+              return (
+                <PositionCard
+                  key={p.id}
+                  position={p}
+                  markPrice={prices[p.symbol] ?? null}
+                  usdtKrwRate={usdtKrwRate}
+                  onClosed={handleClosed}
                 />
-              </li>
-            );
-          }
-          return (
-            <PositionCard
-              key={p.id}
-              position={p}
-              markPrice={prices[p.symbol] ?? null}
-              usdtKrwRate={usdtKrwRate}
-            />
-          );
-        })}
-      </ul>
+              );
+            })}
+          </ul>
 
-      <Link
-        href="/dashboard/trade"
-        className="mt-6 block w-full rounded-lg bg-zinc-100 py-3 text-center text-sm font-semibold text-zinc-900 transition hover:bg-white"
-      >
-        새 포지션 진입
-      </Link>
+          <Link
+            href="/dashboard/trade"
+            className="mt-6 block w-full rounded-lg bg-zinc-100 py-3 text-center text-sm font-semibold text-zinc-900 transition hover:bg-white"
+          >
+            새 포지션 진입
+          </Link>
+        </>
+      )}
     </div>
   );
 }

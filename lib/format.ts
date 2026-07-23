@@ -22,6 +22,16 @@ export function formatUsdt(amount: number): string {
   return `${formatUsdtAmount(amount)} USDT`;
 }
 
+/** 수량 표시 전용: 반올림 대신 절삭(내림)하고, 끝자리 0인 소수점은 제거한다. */
+export function formatQty(amount: number, maxFractionDigits = 6): string {
+  const factor = 10 ** maxFractionDigits;
+  const truncated = Math.floor(amount * factor) / factor;
+  return truncated.toLocaleString("ko-KR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxFractionDigits,
+  });
+}
+
 export function formatUsdtCompact(amount: number): string {
   if (Math.abs(amount) >= 1000) {
     return `${formatAssetNumber(amount / 1000, 1)}K USDT`;

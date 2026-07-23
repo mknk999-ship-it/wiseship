@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useOptimistic, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -11,10 +11,11 @@ import {
 } from "@/app/actions/trade";
 import { PriceChart } from "@/components/price-chart";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
-import { roePercent, toKrw, unrealizedPnl, type Side } from "@/lib/engine";
+import { closePosition, roePercent, toKrw, unrealizedPnl, type Side } from "@/lib/engine";
 import {
   formatDateTime,
   formatKrw,
+  formatQty,
   formatSignedKrw,
   formatSignedUsdt,
   formatSymbol,
@@ -22,7 +23,16 @@ import {
   pnlColorClass,
 } from "@/lib/format";
 import type { OpenPosition } from "@/lib/positions";
-import { validateTpSl } from "@/lib/trade";
+import { CLOSE_RATIOS, resolvePartialClose, validateTpSl, type CloseRatio } from "@/lib/trade";
+
+export type CloseResult = {
+  isFullClose: boolean;
+  remainingQty: number | null;
+  remainingMargin: number | null;
+  realizedPnl: number;
+  realizedKrw: number | null;
+  closeRatio: number;
+};
 
 const LIQ_WARNING_THRESHOLD = 5;
 const initialState: CloseState = {};
@@ -32,12 +42,13 @@ export function PositionCard({
   position,
   markPrice,
   usdtKrwRate,
+  onClosed,
 }: {
   position: OpenPosition;
   markPrice: number | null;
   usdtKrwRate: number | null;
+  onClosed: (position: OpenPosition, result: CloseResult) => void;
 }) {
-  const router = useRouter();
   const [state, formAction, pending] = useActionState(
     closePositionAction,
     initialState,
@@ -45,23 +56,74 @@ export function PositionCard({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [tpSlModalOpen, setTpSlModalOpen] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
+  const [closeRatio, setCloseRatio] = useState<CloseRatio>(1);
+  const [optimisticClose, setOptimisticClose] = useOptimistic<
+    { qty: number; margin: number } | null
+  >(null);
 
+  // 부모에 종료 결과를 알리는 것은 외부(다른 컴포넌트) 상태를 건드리는 진짜
+  // side effect라 useEffect가 맞다. state 객체 전체를 의존성으로 둬서, 같은
+  // 카드에서 연속으로 부분 종료할 때도(매번 새 state 객체) 매번 정확히 한 번씩 알린다.
   useEffect(() => {
-    if (state.success) {
-      const timer = setTimeout(() => router.refresh(), 2500);
-      return () => clearTimeout(timer);
-    }
-  }, [state.success, router]);
+    if (!state.success) return;
+    onClosed(position, {
+      isFullClose: state.isFullClose ?? true,
+      remainingQty: state.remainingQty ?? null,
+      remainingMargin: state.remainingMargin ?? null,
+      realizedPnl: state.realizedPnl ?? 0,
+      realizedKrw: state.realizedKrw ?? null,
+      closeRatio: state.closeRatio ?? 1,
+    });
+    // position/onClosed는 성공 시점의 값을 한 번만 반영하면 되므로 의도적으로 제외
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  // 종료 확인 패널 닫기는 로컬 렌더 상태 조정이라 effect보다 렌더 중 비교가
+  // 더 적합하다 (React 공식 권장 패턴: "Adjusting state when a prop changes").
+  const [handledState, setHandledState] = useState(state);
+  if (state !== handledState) {
+    setHandledState(state);
+    if (state.success) setConfirmOpen(false);
+  }
+
+  function handleCloseSubmit(formData: FormData) {
+    const resolved = resolvePartialClose(position.qty, position.margin, closeRatio);
+    setOptimisticClose({
+      qty: resolved.isFullClose ? 0 : position.qty - resolved.closedQty,
+      margin: resolved.isFullClose ? 0 : position.margin - resolved.closedMargin,
+    });
+    formAction(formData);
+  }
+
+  const displayQty = optimisticClose?.qty ?? position.qty;
+  const displayMargin = optimisticClose?.margin ?? position.margin;
 
   const pnl =
     markPrice != null
-      ? unrealizedPnl(position.side, position.entry_price, markPrice, position.qty)
+      ? unrealizedPnl(position.side, position.entry_price, markPrice, displayQty)
       : null;
-  const roe = pnl != null ? roePercent(pnl, position.margin) : null;
+  const roe = pnl != null && displayMargin > 0 ? roePercent(pnl, displayMargin) : null;
   const pnlKrw =
     pnl != null && usdtKrwRate != null ? pnl * usdtKrwRate : null;
   const marginKrw =
-    usdtKrwRate != null ? toKrw(position.margin, usdtKrwRate) : null;
+    usdtKrwRate != null ? toKrw(displayMargin, usdtKrwRate) : null;
+  const positionValue = markPrice != null ? displayQty * markPrice : null;
+  const positionValueKrw =
+    positionValue != null && usdtKrwRate != null
+      ? positionValue * usdtKrwRate
+      : null;
+
+  const closeMarginPreview = position.margin * closeRatio;
+  const closePreview =
+    markPrice != null
+      ? closePosition(
+          position.side,
+          position.entry_price,
+          markPrice,
+          position.qty * closeRatio,
+          closeMarginPreview,
+        )
+      : null;
 
   const liqDistance =
     markPrice != null
@@ -71,18 +133,6 @@ export function PositionCard({
     liqDistance != null && liqDistance <= LIQ_WARNING_THRESHOLD;
 
   const pnlColorClassValue = pnl == null ? "text-zinc-50" : pnlColorClass(pnl);
-
-  if (state.success) {
-    return (
-      <li>
-        <SettledNotice
-          label="청산 완료"
-          realizedPnl={state.realizedPnl ?? 0}
-          realizedKrw={state.realizedKrw ?? null}
-        />
-      </li>
-    );
-  }
 
   return (
     <li
@@ -118,24 +168,39 @@ export function PositionCard({
             maximumFractionDigits: 2,
           })}
         </span>
-        <span className="shrink-0 whitespace-nowrap">수량</span>
-        <span className="min-w-0 text-right text-zinc-200">
-          {position.qty.toFixed(6)}
-        </span>
-        <span className="shrink-0 whitespace-nowrap">증거금</span>
-        <span className="min-w-0 text-right leading-tight text-zinc-200">
-          <span className="block">{formatUsdt(position.margin)}</span>
-          {marginKrw != null && (
-            <span className="block text-[11px] text-zinc-500">
-              {formatKrw(marginKrw)}
-            </span>
-          )}
-        </span>
         <span className="shrink-0 whitespace-nowrap">현재가</span>
         <span className="min-w-0 text-right text-zinc-200">
           {markPrice != null
             ? markPrice.toLocaleString("ko-KR", { maximumFractionDigits: 2 })
             : "불러오는 중..."}
+        </span>
+        <span className="shrink-0 whitespace-nowrap">수량</span>
+        <span className="min-w-0 text-right text-zinc-200">
+          {formatQty(displayQty)}
+        </span>
+        <span className="shrink-0 whitespace-nowrap">평가금액</span>
+        <span className="min-w-0 text-right leading-tight text-zinc-200">
+          {positionValue != null ? (
+            <>
+              <span className="block">{formatUsdt(positionValue)}</span>
+              {positionValueKrw != null && (
+                <span className="block text-[11px] text-zinc-500">
+                  {formatKrw(positionValueKrw)}
+                </span>
+              )}
+            </>
+          ) : (
+            "계산 중..."
+          )}
+        </span>
+        <span className="shrink-0 whitespace-nowrap">증거금</span>
+        <span className="min-w-0 text-right leading-tight text-zinc-200">
+          <span className="block">{formatUsdt(displayMargin)}</span>
+          {marginKrw != null && (
+            <span className="block text-[11px] text-zinc-500">
+              {formatKrw(marginKrw)}
+            </span>
+          )}
         </span>
       </div>
 
@@ -263,15 +328,61 @@ export function PositionCard({
           onClick={() => setConfirmOpen(true)}
           className="mt-4 w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 text-sm font-medium text-zinc-200 transition hover:border-red-800 hover:text-red-300"
         >
-          시장가 청산
+          포지션 종료
         </button>
       ) : (
-        <div className="mt-4 space-y-2 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3">
-          <p className="text-center text-sm text-zinc-300">
-            정말 시장가로 청산할까요?
+        <div className="mt-4 space-y-3 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3">
+          <p className="text-center text-sm font-medium text-zinc-100">
+            포지션 종료
           </p>
-          <form action={formAction} className="flex gap-2">
+
+          <div className="grid grid-cols-2 items-center gap-y-1.5 text-xs text-zinc-400">
+            <span>진입가</span>
+            <span className="text-right text-zinc-200">
+              {position.entry_price.toLocaleString("ko-KR", {
+                maximumFractionDigits: 2,
+              })}
+            </span>
+            <span>현재가</span>
+            <span className="text-right text-zinc-200">
+              {markPrice != null
+                ? markPrice.toLocaleString("ko-KR", { maximumFractionDigits: 2 })
+                : "불러오는 중..."}
+            </span>
+            <span>증거금</span>
+            <span className="text-right text-zinc-200">
+              {formatUsdt(closeMarginPreview)}
+            </span>
+            <span>예상손익</span>
+            <span
+              className={`text-right font-semibold ${
+                closePreview ? pnlColorClass(closePreview.realized) : "text-zinc-200"
+              }`}
+            >
+              {closePreview ? formatSignedUsdt(closePreview.realized) : "계산 중..."}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1.5">
+            {CLOSE_RATIOS.map((ratio) => (
+              <button
+                key={ratio}
+                type="button"
+                onClick={() => setCloseRatio(ratio)}
+                className={`rounded-md py-1.5 text-xs font-semibold transition ${
+                  closeRatio === ratio
+                    ? "bg-zinc-100 text-zinc-900"
+                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                }`}
+              >
+                {ratio * 100}%
+              </button>
+            ))}
+          </div>
+
+          <form action={handleCloseSubmit} className="flex gap-2">
             <input type="hidden" name="positionId" value={position.id} />
+            <input type="hidden" name="closeRatio" value={closeRatio} />
             <button
               type="button"
               onClick={() => setConfirmOpen(false)}
@@ -285,7 +396,7 @@ export function PositionCard({
               disabled={pending}
               className="flex-1 rounded-lg bg-red-500 py-2 text-sm font-semibold text-zinc-950 hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pending ? "처리 중..." : "청산 확정"}
+              {pending ? "처리 중..." : "종료 확정"}
             </button>
           </form>
         </div>

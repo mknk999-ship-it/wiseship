@@ -77,6 +77,44 @@ export function validateTpSl(
   return result;
 }
 
+// 포지션 부분 종료 허용 비율. 서버가 화이트리스트로 검증해 임의 값을 거부한다.
+export const CLOSE_RATIOS = [0.25, 0.5, 0.75, 1] as const;
+export type CloseRatio = (typeof CLOSE_RATIOS)[number];
+
+export function isValidCloseRatio(value: number): value is CloseRatio {
+  return (CLOSE_RATIOS as readonly number[]).includes(value);
+}
+
+// 종료 후 잔여 수량이 이 값 미만이면 전량 종료로 처리한다 (심볼 공통).
+export const MIN_POSITION_QTY = 0.001;
+
+export type PartialCloseResolution = {
+  closedQty: number;
+  closedMargin: number;
+  isFullClose: boolean;
+};
+
+/**
+ * 종료 비율로부터 실제로 종료할 qty/margin과 전량 종료 여부를 계산한다.
+ * 잔여 수량이 최소 주문 단위(MIN_POSITION_QTY) 미만이 되면 비율과 무관하게
+ * 전량 종료로 승격시킨다. 클라이언트(미리보기)와 서버(실제 처리) 양쪽에서
+ * 동일하게 호출해 결과가 어긋나지 않게 한다.
+ */
+export function resolvePartialClose(
+  qty: number,
+  margin: number,
+  ratio: number,
+): PartialCloseResolution {
+  const remainingQty = qty * (1 - ratio);
+  const isFullClose = ratio >= 1 || (remainingQty > 0 && remainingQty < MIN_POSITION_QTY);
+
+  if (isFullClose) {
+    return { closedQty: qty, closedMargin: margin, isFullClose: true };
+  }
+
+  return { closedQty: qty * ratio, closedMargin: margin * ratio, isFullClose: false };
+}
+
 /**
  * open_position/close_position RPC가 raise exception으로 던진 코드를 한글 안내로 매핑.
  * 매칭되는 코드가 없으면 원문 노출 없이 일반 안내로 대체한다.

@@ -605,6 +605,97 @@ grant execute on function close_position(
   uuid, uuid, numeric, numeric, numeric, numeric, text
 ) to service_role;
 
+-- ===== close_position에 부분 종료(비율 청산) 지원 추가 =====
+-- p_is_full_close=true면 기존과 동일하게 status='closed'로 확정.
+-- false면 positions row는 'open' 상태를 유지한 채 qty/margin만 종료한 만큼 차감한다
+-- (entry_price/leverage/liq_price/tp_price/sl_price는 그대로 — 청산가는 qty/margin에
+-- 의존하지 않는 공식이라 별도 재계산이 필요 없음). closed_qty/closed_margin/is_full_close를
+-- transactions.detail에도 남겨 부분 종료 이력을 추적할 수 있게 한다.
+-- 파라미터 개수가 바뀌므로 CREATE OR REPLACE만으로는 기존 7-인자 오버로드가 남아
+-- PGRST203을 유발한다 — 반드시 먼저 drop.
+drop function if exists close_position(
+  uuid, uuid, numeric, numeric, numeric, numeric, text
+);
+
+create or replace function close_position(
+  p_user_id uuid,
+  p_position_id uuid,
+  p_close_price numeric,
+  p_close_fee numeric,
+  p_realized numeric,
+  p_return_to_balance numeric,
+  p_closed_qty numeric,
+  p_closed_margin numeric,
+  p_is_full_close boolean,
+  p_reason text default 'position_close'
+)
+returns void
+language plpgsql
+as $$
+declare
+  v_status text;
+begin
+  select status into v_status
+    from positions
+    where id = p_position_id and user_id = p_user_id
+    for update;
+
+  if v_status is null then
+    raise exception 'position_not_found';
+  end if;
+  if v_status <> 'open' then
+    raise exception 'already_closed';
+  end if;
+
+  if p_is_full_close then
+    update positions
+      set status = 'closed',
+          close_price = p_close_price,
+          realized_pnl = p_realized,
+          closed_at = now()
+      where id = p_position_id;
+  else
+    update positions
+      set qty = qty - p_closed_qty,
+          margin = margin - p_closed_margin
+      where id = p_position_id;
+  end if;
+
+  update accounts
+    set okx_trading_usdt = okx_trading_usdt + p_return_to_balance
+    where user_id = p_user_id;
+
+  insert into transactions (user_id, type, detail)
+    values (
+      p_user_id,
+      p_reason,
+      jsonb_build_object(
+        'position_id', p_position_id,
+        'close_price', p_close_price,
+        'close_fee', p_close_fee,
+        'realized_pnl', p_realized,
+        'return_to_balance', p_return_to_balance,
+        'closed_qty', p_closed_qty,
+        'closed_margin', p_closed_margin,
+        'is_full_close', p_is_full_close
+      )
+    );
+end;
+$$;
+
+revoke all on function close_position(
+  uuid, uuid, numeric, numeric, numeric, numeric, numeric, numeric, boolean, text
+) from public;
+revoke all on function close_position(
+  uuid, uuid, numeric, numeric, numeric, numeric, numeric, numeric, boolean, text
+) from anon;
+revoke all on function close_position(
+  uuid, uuid, numeric, numeric, numeric, numeric, numeric, numeric, boolean, text
+) from authenticated;
+grant execute on function close_position(
+  uuid, uuid, numeric, numeric, numeric, numeric, numeric, numeric, boolean, text
+) to service_role;
+
 -- ===== 랭킹 집계를 서버(서비스롤)에서 직접 하도록 변경하면서 더 이상 안 쓰는 뷰 제거 =====
 -- Supabase 린터의 "Security Definer View" CRITICAL 경고 해소.
 drop view if exists public.rankings;

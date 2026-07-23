@@ -167,15 +167,25 @@ export default async function AccountPage({
 
         <CollapsibleSection title="OKX 계좌내역">
           <div>
-            <p className="text-xs text-zinc-400">총 평가자산</p>
-            <p className="text-2xl font-semibold text-zinc-50">
+            <p className="text-xs text-zinc-400">원화 총자산</p>
+            {okxTotalEquityKrw != null ? (
+              <p className="mt-1 text-2xl font-semibold text-zinc-50">
+                {formatKrw(okxTotalEquityKrw)}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-red-300">
+                시세를 불러오지 못해 원화 환산을 표시할 수 없어요
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="shrink-0 whitespace-nowrap text-zinc-400">
+              OKX 평가자산
+            </span>
+            <span className="min-w-0 text-right font-medium text-zinc-50">
               {formatUsdt(okxTotalEquity)}
-              {okxTotalEquityKrw != null && (
-                <span className="ml-1 text-sm font-normal text-zinc-500">
-                  ({formatKrw(okxTotalEquityKrw)})
-                </span>
-              )}
-            </p>
+            </span>
           </div>
 
           <div className="flex items-center justify-between gap-2 rounded-lg bg-zinc-950/40 p-3">
