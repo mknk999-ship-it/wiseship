@@ -4,8 +4,10 @@ import { useActionState, useEffect, useOptimistic, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
+  cancelPositionTpSl,
   closePositionAction,
   setPositionTpSl,
+  type CancelTpSlTarget,
   type CloseState,
   type TpSlState,
 } from "@/app/actions/trade";
@@ -43,11 +45,18 @@ export function PositionCard({
   markPrice,
   usdtKrwRate,
   onClosed,
+  onTpSlCancelled,
+  onTpSlCancelError,
 }: {
   position: OpenPosition;
   markPrice: number | null;
   usdtKrwRate: number | null;
   onClosed: (position: OpenPosition, result: CloseResult) => void;
+  onTpSlCancelled: (
+    positionId: string,
+    patch: { tp_price: number | null; sl_price: number | null },
+  ) => void;
+  onTpSlCancelError: (message: string) => void;
 }) {
   const [state, formAction, pending] = useActionState(
     closePositionAction,
@@ -60,6 +69,23 @@ export function PositionCard({
   const [optimisticClose, setOptimisticClose] = useOptimistic<
     { qty: number; margin: number } | null
   >(null);
+  const [cancelPending, setCancelPending] = useState<CancelTpSlTarget | null>(
+    null,
+  );
+
+  async function handleCancelTpSl(target: CancelTpSlTarget) {
+    setCancelPending(target);
+    const result = await cancelPositionTpSl(position.id, target);
+    setCancelPending(null);
+    if (result.success) {
+      onTpSlCancelled(position.id, {
+        tp_price: result.tpPrice ?? null,
+        sl_price: result.slPrice ?? null,
+      });
+    } else {
+      onTpSlCancelError(result.error ?? "요청을 처리하는 중 오류가 발생했습니다.");
+    }
+  }
 
   // 부모에 종료 결과를 알리는 것은 외부(다른 컴포넌트) 상태를 건드리는 진짜
   // side effect라 useEffect가 맞다. state 객체 전체를 의존성으로 둬서, 같은
@@ -245,7 +271,7 @@ export function PositionCard({
       </div>
 
       <div className="mt-2 flex items-center justify-between text-xs text-zinc-500">
-        <span>
+        <span className="flex items-center gap-1">
           TP{" "}
           <span className="text-zinc-300">
             {position.tp_price != null
@@ -254,8 +280,23 @@ export function PositionCard({
                 })
               : "—"}
           </span>
+          {position.tp_price != null && (
+            <button
+              type="button"
+              onClick={() => handleCancelTpSl("tp")}
+              disabled={cancelPending != null}
+              aria-label="TP 해제"
+              className="flex h-4 w-4 items-center justify-center rounded text-zinc-500 transition hover:text-red-300 disabled:opacity-40"
+            >
+              {cancelPending === "tp" ? (
+                <span className="block h-2.5 w-2.5 animate-spin rounded-full border border-zinc-500 border-t-transparent" />
+              ) : (
+                "✕"
+              )}
+            </button>
+          )}
         </span>
-        <span>
+        <span className="flex items-center gap-1">
           SL{" "}
           <span className="text-zinc-300">
             {position.sl_price != null
@@ -264,8 +305,39 @@ export function PositionCard({
                 })
               : "—"}
           </span>
+          {position.sl_price != null && (
+            <button
+              type="button"
+              onClick={() => handleCancelTpSl("sl")}
+              disabled={cancelPending != null}
+              aria-label="SL 해제"
+              className="flex h-4 w-4 items-center justify-center rounded text-zinc-500 transition hover:text-red-300 disabled:opacity-40"
+            >
+              {cancelPending === "sl" ? (
+                <span className="block h-2.5 w-2.5 animate-spin rounded-full border border-zinc-500 border-t-transparent" />
+              ) : (
+                "✕"
+              )}
+            </button>
+          )}
         </span>
       </div>
+
+      {position.tp_price != null && position.sl_price != null && (
+        <div className="mt-1 flex justify-end">
+          <button
+            type="button"
+            onClick={() => handleCancelTpSl("both")}
+            disabled={cancelPending != null}
+            className="flex items-center gap-1 text-xs text-zinc-500 transition hover:text-red-300 disabled:opacity-40"
+          >
+            {cancelPending === "both" && (
+              <span className="block h-2.5 w-2.5 animate-spin rounded-full border border-zinc-500 border-t-transparent" />
+            )}
+            전체 해제
+          </button>
+        </div>
+      )}
 
       {tpSlModalOpen ? (
         <TpSlEditor

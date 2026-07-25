@@ -176,6 +176,19 @@ export function TradePanel({
   const slPnlKrw =
     slPnl != null && usdtKrwRate != null ? toKrw(slPnl, usdtKrwRate) : null;
 
+  const riskReward =
+    tpPnl != null && slPnl != null && slPnl !== 0
+      ? Math.abs(tpPnl) / Math.abs(slPnl)
+      : null;
+  const riskRewardColorClass =
+    riskReward == null
+      ? ""
+      : riskReward >= 2
+        ? "text-emerald-400"
+        : riskReward >= 1
+          ? "text-orange-400"
+          : "text-red-400";
+
   const symbolFlash = flash[symbol];
   const priceColorClass =
     symbolFlash === "up"
@@ -384,6 +397,14 @@ export function TradePanel({
               </p>
             )}
           </div>
+
+          {riskReward != null && (
+            <p
+              className={`col-span-2 mt-1 text-center text-sm font-bold ${riskRewardColorClass}`}
+            >
+              손익비 {riskReward.toFixed(2)} : 1
+            </p>
+          )}
         </div>
 
         <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm">

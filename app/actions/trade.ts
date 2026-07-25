@@ -317,6 +317,49 @@ export async function setPositionTpSl(
   return { success: true };
 }
 
+export type CancelTpSlTarget = "tp" | "sl" | "both";
+
+export type CancelTpSlResult = {
+  error?: string;
+  success?: boolean;
+  tpPrice?: number | null;
+  slPrice?: number | null;
+};
+
+export async function cancelPositionTpSl(
+  positionId: string,
+  target: CancelTpSlTarget,
+): Promise<CancelTpSlResult> {
+  if (!positionId) {
+    return { error: "포지션을 찾을 수 없습니다." };
+  }
+  if (target !== "tp" && target !== "sl" && target !== "both") {
+    return { error: "잘못된 요청입니다." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "계정 정보를 확인할 수 없습니다. 다시 로그인해주세요." };
+  }
+
+  const { data, error } = await supabase.rpc("cancel_tp_sl", {
+    p_position_id: positionId,
+    p_target: target,
+  });
+
+  if (error) return { error: mapTradeError(error.message) };
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    success: true,
+    tpPrice: row?.tp_price ?? null,
+    slPrice: row?.sl_price ?? null,
+  };
+}
+
 export type SettleCheckResult = {
   settled: boolean;
   reason?: "liquidated" | "tp" | "sl";

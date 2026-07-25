@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { settleCheckAction } from "@/app/actions/trade";
 import { PositionCard, SettledNotice, type CloseResult } from "@/components/position-card";
+import { errorBoxClassName } from "@/components/ui";
 import { isLiquidated, unrealizedPnl } from "@/lib/engine";
 import { formatSignedKrw, formatSignedUsdt } from "@/lib/format";
 import type { OpenPosition } from "@/lib/positions";
@@ -47,6 +48,7 @@ export function PositionsList({
     {},
   );
   const [toast, setToast] = useState<Toast | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
   // initialPositions는 TP/SL 저장·자동 정산 등 다른 흐름이 router.refresh()로
   // 새로 내려줄 때만 참조가 바뀐다. 수동 포지션 종료(부분/전체)는 아래
@@ -64,6 +66,12 @@ export function PositionsList({
     const timer = setTimeout(() => setToast(null), TOAST_DURATION_MS);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!errorToast) return;
+    const timer = setTimeout(() => setErrorToast(null), TOAST_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [errorToast]);
 
   const positionsRef = useRef(positions);
   useEffect(() => {
@@ -162,6 +170,20 @@ export function PositionsList({
     });
   }
 
+  function handleTpSlCancelled(
+    positionId: string,
+    patch: { tp_price: number | null; sl_price: number | null },
+  ) {
+    setPositions((prev) =>
+      prev.map((p) => (p.id === positionId ? { ...p, ...patch } : p)),
+    );
+  }
+
+  function handleTpSlCancelError(message: string) {
+    setErrorToast(message);
+    router.refresh();
+  }
+
   const totalPnl = positions.reduce((sum, p) => {
     const mark = prices[p.symbol];
     if (mark == null) return sum;
@@ -185,6 +207,10 @@ export function PositionsList({
             realizedKrw={toast.realizedKrw}
           />
         </div>
+      )}
+
+      {errorToast && (
+        <div className={`mb-4 ${errorBoxClassName}`}>{errorToast}</div>
       )}
 
       {positions.length === 0 ? (
@@ -240,6 +266,8 @@ export function PositionsList({
                   markPrice={prices[p.symbol] ?? null}
                   usdtKrwRate={usdtKrwRate}
                   onClosed={handleClosed}
+                  onTpSlCancelled={handleTpSlCancelled}
+                  onTpSlCancelError={handleTpSlCancelError}
                 />
               );
             })}
