@@ -115,6 +115,18 @@ export function resolvePartialClose(
   return { closedQty: qty * ratio, closedMargin: margin * ratio, isFullClose: false };
 }
 
+// 예상이익:예상손실을 손실=1 기준으로 정규화한 손익비. 한쪽 값이 없거나 손실이 0이면 null.
+// 포지션 카드(SL 기준)와 TP/SL 편집 화면(TP/SL 기준) 양쪽에서 재사용한다.
+export function profitLossRatio(
+  expectedProfit: number | null,
+  expectedLoss: number | null,
+): number | null {
+  if (expectedProfit == null || expectedLoss == null || expectedLoss === 0) {
+    return null;
+  }
+  return Math.abs(expectedProfit) / Math.abs(expectedLoss);
+}
+
 /**
  * open_position/close_position RPC가 raise exception으로 던진 코드를 한글 안내로 매핑.
  * 매칭되는 코드가 없으면 원문 노출 없이 일반 안내로 대체한다.

@@ -1,3 +1,4 @@
+import { PositionNote } from "@/components/position-note";
 import { roePercent } from "@/lib/engine";
 import {
   formatDateTime,
@@ -90,6 +91,16 @@ export function ClosedPositionCard({
           {formatDateTime(position.closed_at)}
         </span>
       </div>
+
+      <PositionNote
+        positionId={position.id}
+        entryReason={position.entry_reason}
+        slReason={position.sl_reason}
+        tpReason={position.tp_reason}
+        exitReview={position.exit_review}
+        noteUpdatedAt={position.note_updated_at}
+        showExitReview={true}
+      />
     </li>
   );
 }

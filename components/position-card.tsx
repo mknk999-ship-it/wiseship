@@ -11,6 +11,7 @@ import {
   type CloseState,
   type TpSlState,
 } from "@/app/actions/trade";
+import { PositionNote } from "@/components/position-note";
 import { PriceChart } from "@/components/price-chart";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
 import { closePosition, roePercent, toKrw, unrealizedPnl, type Side } from "@/lib/engine";
@@ -25,7 +26,13 @@ import {
   pnlColorClass,
 } from "@/lib/format";
 import type { OpenPosition } from "@/lib/positions";
-import { CLOSE_RATIOS, resolvePartialClose, validateTpSl, type CloseRatio } from "@/lib/trade";
+import {
+  CLOSE_RATIOS,
+  profitLossRatio,
+  resolvePartialClose,
+  validateTpSl,
+  type CloseRatio,
+} from "@/lib/trade";
 
 export type CloseResult = {
   isFullClose: boolean;
@@ -150,6 +157,14 @@ export function PositionCard({
           closeMarginPreview,
         )
       : null;
+
+  // 지금 종료 시 손익비: SL이 설정된 경우에만 계산 (예상이익=현재가 기준, 예상손실=SL 도달 시 손실 크기).
+  const expectedProfitNow = pnl;
+  const expectedLossNow =
+    position.sl_price != null
+      ? -unrealizedPnl(position.side, position.entry_price, position.sl_price, displayQty)
+      : null;
+  const closeRatioNow = profitLossRatio(expectedProfitNow, expectedLossNow);
 
   const liqDistance =
     markPrice != null
@@ -394,6 +409,30 @@ export function PositionCard({
         </div>
       )}
 
+      <PositionNote
+        positionId={position.id}
+        entryReason={position.entry_reason}
+        slReason={position.sl_reason}
+        tpReason={position.tp_reason}
+        exitReview={position.exit_review}
+        noteUpdatedAt={position.note_updated_at}
+        showExitReview={false}
+      />
+
+      <div className="mt-3 flex items-center justify-between text-xs text-zinc-400">
+        <span>지금 종료 시 손익비</span>
+        {position.sl_price == null ? (
+          <span className="font-semibold text-zinc-500">SL 미지정</span>
+        ) : closeRatioNow != null ? (
+          <span className="font-semibold">
+            <span className="text-emerald-400">{closeRatioNow.toFixed(1)}</span>
+            <span className="text-red-400"> : 1</span>
+          </span>
+        ) : (
+          <span className="font-semibold text-zinc-200">계산 중...</span>
+        )}
+      </div>
+
       {!confirmOpen ? (
         <button
           type="button"
@@ -532,6 +571,11 @@ function TpSlEditor({
     slPreviewPnl != null && usdtKrwRate != null
       ? toKrw(slPreviewPnl, usdtKrwRate)
       : null;
+  const validExpectedProfit =
+    tpValue != null && !tpSlCheck.tpError ? tpPreviewPnl : null;
+  const validExpectedLoss =
+    slValue != null && !tpSlCheck.slError ? slPreviewPnl : null;
+  const tpSlRatio = profitLossRatio(validExpectedProfit, validExpectedLoss);
 
   return (
     <div className="mt-2 space-y-3 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3">
@@ -606,6 +650,13 @@ function TpSlEditor({
         {!tpSlCheck.slError && tpSlCheck.liqWarning && (
           <p className="mt-1 text-xs text-amber-400">⚠ {tpSlCheck.liqWarning}</p>
         )}
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg bg-zinc-950/40 px-3 py-2 text-xs">
+        <span className="text-zinc-400">손익비</span>
+        <span className="font-semibold text-zinc-200">
+          {tpSlRatio != null ? `${tpSlRatio.toFixed(1)} : 1` : "−"}
+        </span>
       </div>
 
       {tpSlState.error && <p className={errorBoxClassName}>{tpSlState.error}</p>}

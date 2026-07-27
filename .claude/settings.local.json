@@ -18,7 +18,14 @@
       "Bash(git remote *)",
       "Bash(git branch *)",
       "Bash(git push *)",
-      "Bash(node -e \"console.log\\(require\\('./node_modules/next/package.json'\\).version\\)\")"
+      "Bash(node -e \"console.log\\(require\\('./node_modules/next/package.json'\\).version\\)\")",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(grep -Hm1 ^description: /c/Users/Admin/Desktop/wiseship/.claude/skills/*/SKILL.md)",
+      "Bash(echo \"---\")",
+      "Bash(ls /c/Users/Admin/Desktop/wiseship/.claude)",
+      "Bash(cat /c/Users/Admin/Desktop/wiseship/package.json)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

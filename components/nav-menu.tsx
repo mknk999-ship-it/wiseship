@@ -1,5 +1,6 @@
 "use client";
 
+import { CandlestickChart } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -13,7 +14,7 @@ const NAV_LINKS = [
   { href: "/dashboard/positions", label: "포지션 현황" },
   { href: "/dashboard/wallet", label: "지갑 관리" },
   { href: "/dashboard/ranking", label: "랭킹" },
-  { href: "/dashboard/account", label: "내 계좌" },
+  { href: "/dashboard/account", label: "총자산" },
 ];
 
 export function NavMenu({
@@ -78,17 +79,23 @@ export function NavMenu({
                     link.href === "/dashboard"
                       ? pathname === "/dashboard"
                       : pathname.startsWith(link.href);
+                  const isTrade = link.href === "/dashboard/trade";
                   return (
                     <Link
                       key={link.href}
                       href={link.href}
-                      className={`flex items-center justify-between rounded-lg px-3 py-3 text-sm font-medium transition ${
-                        active
-                          ? "bg-zinc-800 text-zinc-50"
-                          : "text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100"
+                      className={`flex items-center justify-between rounded-lg px-3 py-3 transition ${
+                        isTrade
+                          ? "bg-emerald-500/15 text-[15px] font-bold text-emerald-300 hover:bg-emerald-500/25"
+                          : active
+                            ? "bg-zinc-800 text-sm font-medium text-zinc-50"
+                            : "text-sm font-medium text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100"
                       }`}
                     >
-                      <span>{link.label}</span>
+                      <span className="flex items-center gap-2">
+                        {isTrade && <CandlestickChart size={18} />}
+                        {link.label}
+                      </span>
                       {link.href === "/dashboard/positions" && (
                         <span className="text-xs text-zinc-400">
                           {openPositionCount}/5

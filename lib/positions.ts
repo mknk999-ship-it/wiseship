@@ -15,6 +15,11 @@ export type OpenPosition = {
   tp_price: number | null;
   sl_price: number | null;
   opened_at: string;
+  entry_reason: string | null;
+  sl_reason: string | null;
+  tp_reason: string | null;
+  exit_review: string | null;
+  note_updated_at: string | null;
 };
 
 export async function getOpenPositionCount(
@@ -36,7 +41,7 @@ export async function getOpenPositions(
   const { data } = await supabase
     .from("positions")
     .select(
-      "id, symbol, side, margin, leverage, qty, entry_price, liq_price, tp_price, sl_price, opened_at",
+      "id, symbol, side, margin, leverage, qty, entry_price, liq_price, tp_price, sl_price, opened_at, entry_reason, sl_reason, tp_reason, exit_review, note_updated_at",
     )
     .eq("user_id", userId)
     .eq("status", "open")
@@ -96,6 +101,11 @@ export type ClosedPosition = {
   realized_pnl: number | null;
   status: "closed" | "liquidated";
   closed_at: string;
+  entry_reason: string | null;
+  sl_reason: string | null;
+  tp_reason: string | null;
+  exit_review: string | null;
+  note_updated_at: string | null;
 };
 
 export async function getClosedPositions(
@@ -106,7 +116,7 @@ export async function getClosedPositions(
   const { data, count } = await supabase
     .from("positions")
     .select(
-      "id, symbol, side, leverage, margin, entry_price, close_price, realized_pnl, status, closed_at",
+      "id, symbol, side, leverage, margin, entry_price, close_price, realized_pnl, status, closed_at, entry_reason, sl_reason, tp_reason, exit_review, note_updated_at",
       { count: "exact" },
     )
     .eq("user_id", userId)

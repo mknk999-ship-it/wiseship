@@ -360,6 +360,60 @@ export async function cancelPositionTpSl(
   };
 }
 
+export type PositionNoteInput = {
+  entryReason: string | null;
+  slReason: string | null;
+  tpReason: string | null;
+  exitReview: string | null;
+};
+
+export type PositionNoteState = {
+  error?: string;
+  success?: boolean;
+  noteUpdatedAt?: string | null;
+};
+
+/**
+ * update_position_note RPC는 4개 메모 필드를 통째로 덮어쓰므로, 화면에 보이지 않는
+ * 필드(예: 보유 포지션 카드의 exit_review)도 현재 값을 그대로 실어 보내야 한다 —
+ * 그래야 다른 화면에서 이미 적어둔 값이 지워지지 않는다.
+ */
+export async function updatePositionNote(
+  positionId: string,
+  note: PositionNoteInput,
+): Promise<PositionNoteState> {
+  if (!positionId) {
+    return { error: "포지션을 찾을 수 없습니다." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "계정 정보를 확인할 수 없습니다. 다시 로그인해주세요." };
+  }
+
+  const { error } = await supabase.rpc("update_position_note", {
+    p_position_id: positionId,
+    p_entry_reason: note.entryReason,
+    p_sl_reason: note.slReason,
+    p_tp_reason: note.tpReason,
+    p_exit_review: note.exitReview,
+  });
+
+  if (error) return { error: mapTradeError(error.message) };
+
+  const { data: updated } = await supabase
+    .from("positions")
+    .select("note_updated_at")
+    .eq("id", positionId)
+    .eq("user_id", user.id)
+    .single();
+
+  return { success: true, noteUpdatedAt: updated?.note_updated_at ?? null };
+}
+
 export type SettleCheckResult = {
   settled: boolean;
   reason?: "liquidated" | "tp" | "sl";

@@ -1,79 +1,93 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { ClosedPositionCard } from "@/components/closed-position-card";
-import { CollapsibleSection } from "@/components/collapsible-section";
-import { PaginationLinks } from "@/components/pagination-links";
-import { PositionsList } from "@/components/positions-list";
-import { MAX_OPEN_POSITIONS, roePercent } from "@/lib/engine";
-import { calcTotalEquity } from "@/lib/equity";
-import {
-  formatDateTime,
-  formatKrw,
-  formatSignedKrw,
-  formatSignedUsdt,
-  formatUsdt,
-  pnlColorClass,
-} from "@/lib/format";
-import {
-  getCloseReasons,
-  getClosedPositions,
-  getOpenPositions,
-  getPositionAggregate,
-  type CloseReason,
-} from "@/lib/positions";
+import { formatKrw, formatUsdt } from "@/lib/format";
 import { getUsdtKrw } from "@/lib/prices";
 import { createClient } from "@/lib/supabase/server";
-import {
-  getWalletTransactions,
-  walletTransactionLabel,
-  walletTransactionSummary,
-} from "@/lib/transactions";
 
-const PAGE_SIZE = 10;
-
-type MainTab = "positions" | "history";
-type SubTab = "trades" | "wallet";
-
-function tabHref(tab: MainTab, sub: SubTab = "trades") {
-  const params = new URLSearchParams({ tab });
-  if (tab === "history") params.set("sub", sub);
-  return `/dashboard/account?${params.toString()}`;
-}
-
-function pageHref(tab: MainTab, sub: SubTab, page: number) {
-  const params = new URLSearchParams({ tab, page: String(page) });
-  if (tab === "history") params.set("sub", sub);
-  return `/dashboard/account?${params.toString()}`;
-}
-
-function pillClass(active: boolean) {
-  return `flex-1 rounded-md py-2 text-center text-sm font-medium transition ${
-    active
-      ? "bg-zinc-700 text-zinc-50 shadow-sm"
-      : "text-zinc-400 hover:text-zinc-200"
-  }`;
-}
-
-export default async function AccountPage({
-  searchParams,
+function TotalAssetCard({
+  title,
+  titleExtra,
+  children,
 }: {
-  searchParams: Promise<{ tab?: string; sub?: string; page?: string }>;
+  title: string;
+  titleExtra?: React.ReactNode;
+  children: React.ReactNode;
 }) {
-  const sp = await searchParams;
-  const tab: MainTab = sp.tab === "history" ? "history" : "positions";
-  const sub: SubTab = sp.sub === "wallet" ? "wallet" : "trades";
-  const page = Math.max(1, Number(sp.page) || 1);
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+      <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        {title}
+      </p>
+      {titleExtra != null && (
+        <p className="mt-1 break-words text-2xl font-bold tabular-nums text-white">
+          {titleExtra}
+        </p>
+      )}
+      <div className="mt-3 space-y-1.5">{children}</div>
+    </div>
+  );
+}
 
+function KrwRow({ label, krw }: { label: string; krw: number }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-sm">
+      <span className="shrink-0 whitespace-nowrap text-zinc-400">{label}</span>
+      <span className="min-w-0 font-medium tabular-nums text-zinc-300">
+        {formatKrw(krw)}
+      </span>
+    </div>
+  );
+}
+
+function UsdtRow({
+  label,
+  usdt,
+  rate,
+}: {
+  label: string;
+  usdt: number;
+  rate: number | null;
+}) {
+  const krw = rate != null ? usdt * rate : null;
+  return (
+    <div className="flex items-center justify-between gap-2 text-sm">
+      <span className="shrink-0 whitespace-nowrap text-zinc-400">{label}</span>
+      <span className="min-w-0 text-right">
+        <span className="font-medium tabular-nums text-zinc-300">
+          {formatUsdt(usdt)}
+        </span>
+        {krw != null && (
+          <span className="ml-1 text-xs font-normal text-zinc-500">
+            ({formatKrw(krw)})
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+export default async function AccountPage() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("nickname")
+    .eq("id", user.id)
+    .single();
 
   const { data: account } = await supabase
     .from("accounts")
-    .select("upbit_krw, upbit_usdt, okx_funding_usdt, okx_trading_usdt")
+    .select(
+      "upbit_krw, upbit_usdt, okx_funding_usdt, okx_trading_usdt, initial_krw",
+    )
     .eq("user_id", user.id)
     .single();
 
@@ -84,6 +98,9 @@ export default async function AccountPage({
     rate = null;
   }
 
+  const nickname = profile?.nickname ?? "사용자";
+  const setupComplete = (account?.initial_krw ?? 0) !== 0;
+
   const upbitKrw = account?.upbit_krw ?? 0;
   const upbitUsdt = account?.upbit_usdt ?? 0;
   const okxFunding = account?.okx_funding_usdt ?? 0;
@@ -91,243 +108,75 @@ export default async function AccountPage({
   const okxWalletUsdt = okxFunding + okxTrading;
 
   const upbitTotalKrw = rate != null ? upbitKrw + upbitUsdt * rate : null;
-
-  const aggregate = await getPositionAggregate(supabase, user.id);
-  const okxTotalEquity = calcTotalEquity({
-    walletBalance: okxWalletUsdt,
-    totalMargin: aggregate.totalMargin,
-    totalUnrealizedPnl: aggregate.totalUnrealizedPnl,
-  });
-  const okxTotalEquityKrw = rate != null ? okxTotalEquity * rate : null;
-  const pnlKrw = rate != null ? aggregate.totalUnrealizedPnl * rate : null;
-  const pnlRoe =
-    aggregate.totalMargin > 0
-      ? roePercent(aggregate.totalUnrealizedPnl, aggregate.totalMargin)
-      : null;
-  const pnlColor = pnlColorClass(aggregate.totalUnrealizedPnl);
-
-  let openPositions: Awaited<ReturnType<typeof getOpenPositions>> = [];
-  let closedItems: Awaited<ReturnType<typeof getClosedPositions>>["items"] = [];
-  let closedTotal = 0;
-  let closeReasons = new Map<string, CloseReason>();
-  let walletItems: Awaited<ReturnType<typeof getWalletTransactions>>["items"] =
-    [];
-  let walletTotal = 0;
-
-  if (tab === "positions") {
-    openPositions = await getOpenPositions(supabase, user.id);
-  } else if (sub === "trades") {
-    const result = await getClosedPositions(supabase, user.id, {
-      limit: PAGE_SIZE,
-      offset: (page - 1) * PAGE_SIZE,
-    });
-    closedItems = result.items;
-    closedTotal = result.total;
-    closeReasons = await getCloseReasons(
-      supabase,
-      user.id,
-      closedItems.filter((p) => p.status === "closed").map((p) => p.id),
-    );
-  } else {
-    const result = await getWalletTransactions(supabase, user.id, {
-      limit: PAGE_SIZE,
-      offset: (page - 1) * PAGE_SIZE,
-    });
-    walletItems = result.items;
-    walletTotal = result.total;
-  }
+  const okxWalletKrw = rate != null ? okxWalletUsdt * rate : null;
 
   return (
     <div className="flex flex-1 items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm space-y-6">
-        <h1 className="text-center text-2xl font-semibold tracking-tight text-zinc-50">
-          내 계좌
+      <div className="w-full max-w-sm">
+        <p className="text-center text-lg text-zinc-300">환영합니다,</p>
+        <h1 className="mt-1 text-center text-3xl font-semibold tracking-tight text-zinc-50">
+          {nickname}님
         </h1>
 
-        <section className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            업비트
-          </p>
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs text-zinc-400">원화 총자산</p>
-            {upbitTotalKrw != null ? (
-              <p className="mt-1 text-2xl font-semibold text-zinc-50">
-                {formatKrw(upbitTotalKrw)}
-              </p>
-            ) : (
-              <p className="mt-1 text-sm text-red-300">
-                시세를 불러오지 못해 USDT 환산을 뺀 값이에요
-              </p>
-            )}
-            <p className="mt-2 text-xs text-zinc-500">
-              KRW {formatKrw(upbitKrw)} + USDT {formatUsdt(upbitUsdt)} 환산 합계
+        {!setupComplete && (
+          <Link
+            href="/dashboard/margin-setup"
+            className="mt-8 block rounded-2xl border-2 border-dashed border-zinc-600 bg-zinc-900/60 p-6 text-center transition hover:border-zinc-400"
+          >
+            <p className="text-lg font-semibold text-zinc-50">
+              증거금 1,000만원을 받아보세요
             </p>
-          </div>
-        </section>
-
-        <CollapsibleSection title="OKX 계좌내역">
-          <div>
-            <p className="text-xs text-zinc-400">원화 총자산</p>
-            {okxTotalEquityKrw != null ? (
-              <p className="mt-1 text-2xl font-semibold text-zinc-50">
-                {formatKrw(okxTotalEquityKrw)}
-              </p>
-            ) : (
-              <p className="mt-1 text-sm text-red-300">
-                시세를 불러오지 못해 원화 환산을 표시할 수 없어요
-              </p>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="shrink-0 whitespace-nowrap text-zinc-400">
-              OKX 평가자산
+            <p className="mt-2 text-sm text-zinc-400">
+              실전 거래를 위해 초기 자금을 받아야 해요
+            </p>
+            <span className="mt-4 inline-block rounded-lg bg-zinc-100 px-6 py-2 text-sm font-semibold text-zinc-900">
+              증거금 받기
             </span>
-            <span className="min-w-0 text-right font-medium text-zinc-50">
-              {formatUsdt(okxTotalEquity)}
-            </span>
-          </div>
+          </Link>
+        )}
 
-          <div className="flex items-center justify-between gap-2 rounded-lg bg-zinc-950/40 p-3">
-            <span className="shrink-0 whitespace-nowrap text-sm text-zinc-400">
-              미실현 손익
-            </span>
-            <span className={`min-w-0 text-right text-sm font-semibold ${pnlColor}`}>
-              {formatSignedUsdt(aggregate.totalUnrealizedPnl)}
-              {pnlKrw != null && (
-                <span className="ml-1 text-xs font-normal text-zinc-500">
-                  ({formatSignedKrw(pnlKrw)})
-                </span>
-              )}
-              {pnlRoe != null && (
-                <span className="ml-2">
-                  {pnlRoe > 0 ? "+" : ""}
-                  {pnlRoe.toFixed(2)}%
-                </span>
-              )}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="shrink-0 whitespace-nowrap text-zinc-400">
-              보유 USDT (Funding+Trading)
-            </span>
-            <span className="min-w-0 text-right font-medium text-zinc-50">
-              {formatUsdt(okxWalletUsdt)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="shrink-0 whitespace-nowrap text-zinc-400">총 증거금</span>
-            <span className="min-w-0 text-right font-medium text-zinc-50">
-              {formatUsdt(aggregate.totalMargin)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="shrink-0 whitespace-nowrap text-zinc-400">보유 포지션</span>
-            <span className="min-w-0 text-right font-medium text-zinc-50">
-              {aggregate.openCount}/{MAX_OPEN_POSITIONS}
-            </span>
-          </div>
-        </CollapsibleSection>
-
-        <div>
-          <div className="flex rounded-lg bg-zinc-800/60 p-1">
-            <Link href={tabHref("positions")} className={pillClass(tab === "positions")}>
-              보유 포지션
-            </Link>
-            <Link href={tabHref("history")} className={pillClass(tab === "history")}>
-              거래 내역
-            </Link>
-          </div>
-
-          {tab === "history" && (
-            <div className="mt-2 flex rounded-lg bg-zinc-800/60 p-1">
-              <Link
-                href={tabHref("history", "trades")}
-                className={pillClass(sub === "trades")}
-              >
-                청산 내역
-              </Link>
-              <Link
-                href={tabHref("history", "wallet")}
-                className={pillClass(sub === "wallet")}
-              >
-                입출금 내역
-              </Link>
-            </div>
-          )}
-
-          <div className="mt-4">
-            {tab === "positions" && (
-              <PositionsList initialPositions={openPositions} />
-            )}
-
-            {tab === "history" && sub === "trades" && (
+        <div className="mt-8 space-y-3">
+          <TotalAssetCard
+            title="업비트 총자산"
+            titleExtra={upbitTotalKrw != null ? formatKrw(upbitTotalKrw) : undefined}
+          >
+            <KrwRow label="KRW" krw={upbitKrw} />
+            <UsdtRow label="USDT" usdt={upbitUsdt} rate={rate} />
+          </TotalAssetCard>
+          <TotalAssetCard
+            title="OKX 총자산"
+            titleExtra={
               <>
-                {closedItems.length === 0 ? (
-                  <p className="text-center text-sm text-zinc-400">
-                    종료된 거래가 없어요.
-                  </p>
-                ) : (
-                  <ul className="space-y-3">
-                    {closedItems.map((p) => (
-                      <ClosedPositionCard
-                        key={p.id}
-                        position={p}
-                        reason={
-                          p.status === "liquidated"
-                            ? "liquidated"
-                            : (closeReasons.get(p.id) ?? "manual")
-                        }
-                      />
-                    ))}
-                  </ul>
+                {formatUsdt(okxWalletUsdt)}
+                {okxWalletKrw != null && (
+                  <span className="ml-1 text-base font-normal text-zinc-400">
+                    ({formatKrw(okxWalletKrw)})
+                  </span>
                 )}
-                <PaginationLinks
-                  page={page}
-                  totalPages={Math.max(1, Math.ceil(closedTotal / PAGE_SIZE))}
-                  makeHref={(p) => pageHref("history", "trades", p)}
-                />
               </>
-            )}
-
-            {tab === "history" && sub === "wallet" && (
-              <>
-                {walletItems.length === 0 ? (
-                  <p className="text-center text-sm text-zinc-400">
-                    입출금 내역이 없어요.
-                  </p>
-                ) : (
-                  <ul className="space-y-2">
-                    {walletItems.map((tx, i) => (
-                      <li
-                        key={i}
-                        className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
-                      >
-                        <div className="shrink-0">
-                          <p className="whitespace-nowrap text-sm font-medium text-zinc-100">
-                            {walletTransactionLabel(tx.type)}
-                          </p>
-                          <p className="mt-1 whitespace-nowrap text-xs text-zinc-500">
-                            {formatDateTime(tx.created_at)}
-                          </p>
-                        </div>
-                        <p className="min-w-0 text-right text-sm font-medium text-zinc-200">
-                          {walletTransactionSummary(tx)}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <PaginationLinks
-                  page={page}
-                  totalPages={Math.max(1, Math.ceil(walletTotal / PAGE_SIZE))}
-                  makeHref={(p) => pageHref("history", "wallet", p)}
-                />
-              </>
-            )}
-          </div>
+            }
+          >
+            <UsdtRow label="Funding" usdt={okxFunding} rate={rate} />
+            <UsdtRow label="Trading" usdt={okxTrading} rate={rate} />
+          </TotalAssetCard>
         </div>
+
+        {setupComplete && (
+          <div className="mt-8 space-y-3">
+            <Link
+              href="/dashboard/trade"
+              className="block w-full rounded-lg bg-zinc-100 py-3 text-center text-sm font-semibold text-zinc-900 transition hover:bg-white"
+            >
+              선물 거래
+            </Link>
+            <Link
+              href="/dashboard/wallet"
+              className="block w-full rounded-lg border border-zinc-700 bg-zinc-800 py-3 text-center text-sm font-medium text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-700"
+            >
+              지갑 관리
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
