@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { OkxTotalAssetCard } from "@/components/okx-total-asset-card";
 import { formatKrw, formatUsdt } from "@/lib/format";
+import { getOpenPositions } from "@/lib/positions";
 import { getUsdtKrw } from "@/lib/prices";
 import { createClient } from "@/lib/supabase/server";
 
@@ -91,6 +93,8 @@ export default async function AccountPage() {
     .eq("user_id", user.id)
     .single();
 
+  const openPositions = await getOpenPositions(supabase, user.id);
+
   let rate: number | null = null;
   try {
     rate = await getUsdtKrw();
@@ -105,10 +109,8 @@ export default async function AccountPage() {
   const upbitUsdt = account?.upbit_usdt ?? 0;
   const okxFunding = account?.okx_funding_usdt ?? 0;
   const okxTrading = account?.okx_trading_usdt ?? 0;
-  const okxWalletUsdt = okxFunding + okxTrading;
 
   const upbitTotalKrw = rate != null ? upbitKrw + upbitUsdt * rate : null;
-  const okxWalletKrw = rate != null ? okxWalletUsdt * rate : null;
 
   return (
     <div className="flex flex-1 items-center justify-center px-4 py-12">
@@ -143,22 +145,18 @@ export default async function AccountPage() {
             <KrwRow label="KRW" krw={upbitKrw} />
             <UsdtRow label="USDT" usdt={upbitUsdt} rate={rate} />
           </TotalAssetCard>
-          <TotalAssetCard
-            title="OKX 총자산"
-            titleExtra={
-              <>
-                {formatUsdt(okxWalletUsdt)}
-                {okxWalletKrw != null && (
-                  <span className="ml-1 text-base font-normal text-zinc-400">
-                    ({formatKrw(okxWalletKrw)})
-                  </span>
-                )}
-              </>
-            }
-          >
-            <UsdtRow label="Funding" usdt={okxFunding} rate={rate} />
-            <UsdtRow label="Trading" usdt={okxTrading} rate={rate} />
-          </TotalAssetCard>
+          <OkxTotalAssetCard
+            okxFunding={okxFunding}
+            okxTrading={okxTrading}
+            positions={openPositions.map((p) => ({
+              symbol: p.symbol,
+              side: p.side,
+              margin: p.margin,
+              qty: p.qty,
+              entry_price: p.entry_price,
+            }))}
+            initialRate={rate}
+          />
         </div>
 
         {setupComplete && (

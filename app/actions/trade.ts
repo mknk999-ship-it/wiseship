@@ -414,6 +414,46 @@ export async function updatePositionNote(
   return { success: true, noteUpdatedAt: updated?.note_updated_at ?? null };
 }
 
+export type UpdateClosedPositionSlState = {
+  error?: string;
+  success?: boolean;
+  slPrice?: number;
+};
+
+/**
+ * 종료된 포지션의 sl_price를 사후에 채워 넣는다(거래내역 손익비 계산용).
+ * update_position_note와 동일하게 RPC가 auth.uid()로 본인 소유 행만 잠그므로
+ * p_user_id는 보내지 않는다.
+ */
+export async function updateClosedPositionSl(
+  positionId: string,
+  slPrice: number,
+): Promise<UpdateClosedPositionSlState> {
+  if (!positionId) {
+    return { error: "포지션을 찾을 수 없습니다." };
+  }
+  if (!Number.isFinite(slPrice) || slPrice <= 0) {
+    return { error: "올바른 가격을 입력해주세요." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "계정 정보를 확인할 수 없습니다. 다시 로그인해주세요." };
+  }
+
+  const { error } = await supabase.rpc("update_position_sl", {
+    p_position_id: positionId,
+    p_sl_price: slPrice,
+  });
+
+  if (error) return { error: mapTradeError(error.message) };
+
+  return { success: true, slPrice };
+}
+
 export type SettleCheckResult = {
   settled: boolean;
   reason?: "liquidated" | "tp" | "sl";

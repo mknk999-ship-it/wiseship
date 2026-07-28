@@ -99,7 +99,10 @@ export type ClosedPosition = {
   entry_price: number;
   close_price: number | null;
   realized_pnl: number | null;
+  tp_price: number | null;
+  sl_price: number | null;
   status: "closed" | "liquidated";
+  opened_at: string;
   closed_at: string;
   entry_reason: string | null;
   sl_reason: string | null;
@@ -116,7 +119,7 @@ export async function getClosedPositions(
   const { data, count } = await supabase
     .from("positions")
     .select(
-      "id, symbol, side, leverage, margin, entry_price, close_price, realized_pnl, status, closed_at, entry_reason, sl_reason, tp_reason, exit_review, note_updated_at",
+      "id, symbol, side, leverage, margin, entry_price, close_price, realized_pnl, tp_price, sl_price, status, opened_at, closed_at, entry_reason, sl_reason, tp_reason, exit_review, note_updated_at",
       { count: "exact" },
     )
     .eq("user_id", userId)

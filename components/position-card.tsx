@@ -203,6 +203,8 @@ export function PositionCard({
         <span className="min-w-0 text-right text-zinc-200">
           {formatDateTime(position.opened_at)}
         </span>
+        <span className="shrink-0 whitespace-nowrap">종료</span>
+        <span className="min-w-0 text-right text-zinc-200">—</span>
         <span className="shrink-0 whitespace-nowrap">진입가</span>
         <span className="min-w-0 text-right text-zinc-200">
           {position.entry_price.toLocaleString("ko-KR", {
@@ -349,7 +351,7 @@ export function PositionCard({
             {cancelPending === "both" && (
               <span className="block h-2.5 w-2.5 animate-spin rounded-full border border-zinc-500 border-t-transparent" />
             )}
-            전체 해제
+            TP/SL 전체해제
           </button>
         </div>
       )}
@@ -579,6 +581,18 @@ function TpSlEditor({
 
   return (
     <div className="mt-2 space-y-3 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-zinc-300">TP/SL 설정</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="TP/SL 설정 닫기"
+          className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 transition hover:text-zinc-100"
+        >
+          ✕
+        </button>
+      </div>
+
       <div>
         <div className="mb-1 flex items-center justify-between">
           <label htmlFor={`tp-${position.id}`} className="text-xs text-zinc-400">

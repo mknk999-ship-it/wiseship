@@ -1,3 +1,4 @@
+import { ClosedPositionRatio } from "@/components/closed-position-ratio";
 import { PositionNote } from "@/components/position-note";
 import { roePercent } from "@/lib/engine";
 import {
@@ -75,22 +76,36 @@ export function ClosedPositionCard({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-zinc-500">
-        <span className="min-w-0">
-          {position.entry_price.toLocaleString("ko-KR", {
-            maximumFractionDigits: 2,
-          })}
-          {" → "}
-          {position.close_price != null
-            ? position.close_price.toLocaleString("ko-KR", {
-                maximumFractionDigits: 2,
-              })
-            : "—"}
+      <div className="mt-2 text-xs text-zinc-500">
+        {position.entry_price.toLocaleString("ko-KR", {
+          maximumFractionDigits: 2,
+        })}
+        {" → "}
+        {position.close_price != null
+          ? position.close_price.toLocaleString("ko-KR", {
+              maximumFractionDigits: 2,
+            })
+          : "—"}
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 items-center gap-y-1.5 text-xs text-zinc-400">
+        <span className="shrink-0 whitespace-nowrap">진입 시간</span>
+        <span className="min-w-0 text-right text-zinc-200">
+          {formatDateTime(position.opened_at)}
         </span>
-        <span className="shrink-0 whitespace-nowrap">
+        <span className="shrink-0 whitespace-nowrap">종료</span>
+        <span className="min-w-0 text-right text-zinc-200">
           {formatDateTime(position.closed_at)}
         </span>
       </div>
+
+      <ClosedPositionRatio
+        positionId={position.id}
+        side={position.side}
+        entryPrice={position.entry_price}
+        tpPrice={position.tp_price}
+        slPrice={position.sl_price}
+      />
 
       <PositionNote
         positionId={position.id}

@@ -154,6 +154,9 @@ export function mapTradeError(message: string): string {
   if (m.includes("position_not_found")) {
     return "포지션을 찾을 수 없습니다.";
   }
+  if (m.includes("invalid_sl_price")) {
+    return "올바른 SL 가격을 입력해주세요.";
+  }
   if (m.includes("already_closed")) {
     return "이미 청산된 포지션입니다.";
   }

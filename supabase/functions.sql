@@ -1180,3 +1180,37 @@ revoke all on function grant_initial_margin(uuid) from public;
 revoke all on function grant_initial_margin(uuid) from anon;
 revoke all on function grant_initial_margin(uuid) from authenticated;
 grant execute on function grant_initial_margin(uuid) to service_role;
+
+-- ===== 종료된 포지션의 SL 사후 입력 (거래내역 손익비 계산용) =====
+-- TP/SL 없이 진입했거나 종료 전 취소한 경우에도, 종료 후 복기용으로 sl_price만
+-- 별도로 채워 넣을 수 있게 하는 전용 RPC. update_position_note와 동일한 보안 패턴:
+-- 클라이언트가 user_id를 보내지 않고, auth.uid()로 호출자 본인 소유 행만 잠근다.
+-- 진행 중인 포지션의 SL 변경은 기존 setPositionTpSl/cancel_tp_sl 흐름(현재가·청산가
+-- 검증 포함)을 그대로 써야 하므로, 이 RPC는 종료된(closed/liquidated) 행만 허용한다.
+create or replace function update_position_sl(
+  p_position_id uuid,
+  p_sl_price numeric
+)
+returns void
+language plpgsql
+as $$
+begin
+  if p_sl_price is null or p_sl_price <= 0 then
+    raise exception 'invalid_sl_price';
+  end if;
+
+  update positions
+    set sl_price = p_sl_price
+    where id = p_position_id
+      and user_id = auth.uid()
+      and status in ('closed', 'liquidated');
+
+  if not found then
+    raise exception 'position_not_found';
+  end if;
+end;
+$$;
+
+revoke all on function update_position_sl(uuid, numeric) from public;
+revoke all on function update_position_sl(uuid, numeric) from anon;
+grant execute on function update_position_sl(uuid, numeric) to authenticated;
