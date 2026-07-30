@@ -3,10 +3,10 @@
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 
 import { openPositionAction, type TradeState } from "@/app/actions/trade";
+import LeverageControl from "@/components/LeverageControl";
 import { PriceChart } from "@/components/price-chart";
 import { errorBoxClassName, inputClassName } from "@/components/ui";
 import {
-  MAX_LEVERAGE,
   openPosition,
   toKrw,
   unrealizedPnl,
@@ -307,27 +307,10 @@ export function TradePanel({
         </div>
 
         <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <label
-              htmlFor="leverage-input"
-              className="text-sm font-medium text-zinc-300"
-            >
-              레버리지
-            </label>
-            <span className="text-2xl font-bold tabular-nums text-zinc-50">
-              {leverage}x
-            </span>
-          </div>
-          <input
-            id="leverage-input"
-            type="range"
-            min={1}
-            max={MAX_LEVERAGE}
-            step={1}
-            value={leverage}
-            onChange={(e) => setLeverage(Number(e.target.value))}
-            className="h-3 w-full cursor-pointer appearance-none rounded-full bg-zinc-800 accent-zinc-100"
-          />
+          <label className="mb-1.5 block text-sm font-medium text-zinc-300">
+            레버리지
+          </label>
+          <LeverageControl value={leverage} onChange={setLeverage} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
